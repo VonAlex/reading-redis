@@ -38,6 +38,8 @@
  * by the user before to call AlFreeList().
  *
  * On error, NULL is returned. Otherwise the pointer to the new list. */
+
+// 创建一个空 list
 list *listCreate(void)
 {
     struct list *list;
@@ -84,7 +86,7 @@ list *listAddNodeHead(list *list, void *value)
     if ((node = zmalloc(sizeof(*node))) == NULL)
         return NULL;
     node->value = value;
-    if (list->len == 0) {
+    if (list->len == 0) { // 空的 list
         list->head = list->tail = node;
         node->prev = node->next = NULL;
     } else {
@@ -123,19 +125,20 @@ list *listAddNodeTail(list *list, void *value)
     return list;
 }
 
+// 在原 list 指定节点后（after=1）或前插入一个节点
 list *listInsertNode(list *list, listNode *old_node, void *value, int after) {
     listNode *node;
 
     if ((node = zmalloc(sizeof(*node))) == NULL)
         return NULL;
     node->value = value;
-    if (after) {
+    if (after) { // 后
         node->prev = old_node;
         node->next = old_node->next;
         if (list->tail == old_node) {
             list->tail = node;
         }
-    } else {
+    } else { // 前
         node->next = old_node;
         node->prev = old_node->prev;
         if (list->head == old_node) {
@@ -158,11 +161,11 @@ list *listInsertNode(list *list, listNode *old_node, void *value, int after) {
  * This function can't fail. */
 void listDelNode(list *list, listNode *node)
 {
-    if (node->prev)
+    if (node->prev) // 是否有前驱节点
         node->prev->next = node->next;
     else
-        list->head = node->next;
-    if (node->next)
+        list->head = node->next; // 更新 list->head
+    if (node->next) // 是否有后继节点
         node->next->prev = node->prev;
     else
         list->tail = node->prev;
@@ -194,11 +197,13 @@ void listReleaseIterator(listIter *iter) {
 }
 
 /* Create an iterator in the list private iterator structure */
+// 正向遍历器
 void listRewind(list *list, listIter *li) {
     li->next = list->head;
     li->direction = AL_START_HEAD;
 }
 
+// 反向遍历器
 void listRewindTail(list *list, listIter *li) {
     li->next = list->tail;
     li->direction = AL_START_TAIL;
@@ -218,6 +223,7 @@ void listRewindTail(list *list, listIter *li) {
  * }
  *
  * */
+// 根据遍历器中的方向进行变量
 listNode *listNext(listIter *iter)
 {
     listNode *current = iter->next;
@@ -245,16 +251,20 @@ list *listDup(list *orig)
     listIter iter;
     listNode *node;
 
-    if ((copy = listCreate()) == NULL)
+    if ((copy = listCreate()) == NULL) // 分配内存，创建一个新的 list
         return NULL;
+
+    // 先拷贝 dup/free/match 函数
     copy->dup = orig->dup;
     copy->free = orig->free;
     copy->match = orig->match;
+
     listRewind(orig, &iter);
+    // 后复制 list 指向的链表的值
     while((node = listNext(&iter)) != NULL) {
         void *value;
 
-        if (copy->dup) {
+        if (copy->dup) { // 使用指定的 dup 函数复制
             value = copy->dup(node->value);
             if (value == NULL) {
                 listRelease(copy);
@@ -262,7 +272,7 @@ list *listDup(list *orig)
             }
         } else
             value = node->value;
-        if (listAddNodeTail(copy, value) == NULL) {
+        if (listAddNodeTail(copy, value) == NULL) { // 添加失败，释放掉 list
             listRelease(copy);
             return NULL;
         }
@@ -286,7 +296,7 @@ listNode *listSearchKey(list *list, void *key)
 
     listRewind(list, &iter);
     while((node = listNext(&iter)) != NULL) {
-        if (list->match) {
+        if (list->match) { // list 中有指定的比较器
             if (list->match(node->value, key)) {
                 return node;
             }
@@ -307,7 +317,7 @@ listNode *listSearchKey(list *list, void *key)
 listNode *listIndex(list *list, long index) {
     listNode *n;
 
-    if (index < 0) {
+    if (index < 0) { // 从尾部查找
         index = (-index)-1;
         n = list->tail;
         while(index-- && n) n = n->prev;
@@ -319,17 +329,20 @@ listNode *listIndex(list *list, long index) {
 }
 
 /* Rotate the list removing the tail node and inserting it to the head. */
+// 1 → 2 → 3 → 4 变成 4 → 1 → 2 → 3
 void listRotate(list *list) {
-    listNode *tail = list->tail;
+    listNode *tail = list->tail;// 取到原尾节点
 
-    if (listLength(list) <= 1) return;
+    if (listLength(list) <= 1) return; // 1 个节点不需要 rotate
 
-    /* Detach current tail */
+    /* Detach current tail 分离尾部节点*/
     list->tail = tail->prev;
     list->tail->next = NULL;
-    /* Move it as head */
+
+    /* Move it as head 转移到 head */
     list->head->prev = tail;
     tail->prev = NULL;
     tail->next = list->head;
-    list->head = tail;
+
+    list->head = tail; // 更新 list 的新 head
 }

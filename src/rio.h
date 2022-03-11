@@ -62,17 +62,22 @@ struct _rio {
 
     /* Backend-specific vars. */
     union {
+        // 内存 buffer 对象
         /* In-memory buffer target. */
         struct {
             sds ptr;
             off_t pos;
         } buffer;
+
+        // 标准文件指针对象
         /* Stdio file pointer target. */
         struct {
             FILE *fp;
             off_t buffered; /* Bytes written since last fsync. */
             off_t autosync; /* fsync after 'autosync' bytes written. */
         } file;
+        
+        // 多 fd 对象，用于写入 N 个 socket
         /* Multiple FDs target (used to write to N sockets). */
         struct {
             int *fds;       /* File descriptors. */

@@ -162,10 +162,15 @@ void rioInitWithFile(rio *r, FILE *fp) {
 /* Returns 1 or 0 for success/failure.
  * The function returns success as long as we are able to correctly write
  * to at least one file descriptor.
+ * 只要能够正确写入一个 fd，这个函数就返回成功。
  *
  * When buf is NULL and len is 0, the function performs a flush operation
  * if there is some pending buffer, so this function is also used in order
- * to implement rioFdsetFlush(). */
+ * to implement rioFdsetFlush().
+ * 当 buf = NULL，且 len = 0，该函数会执行一个 flush 操作，如果有 pending buffer。
+ *
+ * r->io.fdset.buf 中的数据没 16K 调用 write 写入一次，只要有一个 fd 写入成功，就返回 1，否则返回 0
+ *  */
 static size_t rioFdsetWrite(rio *r, const void *buf, size_t len) {
     ssize_t retval;
     int j;
@@ -177,7 +182,7 @@ static size_t rioFdsetWrite(rio *r, const void *buf, size_t len) {
     if (len) {
         r->io.fdset.buf = sdscatlen(r->io.fdset.buf,buf,len);
         len = 0; /* Prevent entering the while below if we don't flush. */
-        if (sdslen(r->io.fdset.buf) > PROTO_IOBUF_LEN) doflush = 1;
+        if (sdslen(r->io.fdset.buf) > PROTO_IOBUF_LEN) doflush = 1; // 16k 数据
     }
 
     if (doflush) {

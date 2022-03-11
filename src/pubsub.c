@@ -236,7 +236,7 @@ int pubsubPublishMessage(robj *channel, robj *message) {
         listIter li;
 
         listRewind(list,&li);
-        while ((ln = listNext(&li)) != NULL) {
+        while ((ln = listNext(&li)) != NULL) { // 给某 channel 下所有 client 都发送消息
             client *c = ln->value;
 
             addReply(c,shared.mbulkhdr[3]);
@@ -247,6 +247,7 @@ int pubsubPublishMessage(robj *channel, robj *message) {
         }
     }
     /* Send to clients listening to matching channels */
+    // pubsub_patterns: 哪个 client 订阅了哪个模式的 channel
     if (listLength(server.pubsub_patterns)) {
         listRewind(server.pubsub_patterns,&li);
         channel = getDecodedObject(channel);

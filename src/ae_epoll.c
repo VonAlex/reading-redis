@@ -33,13 +33,14 @@
 
 typedef struct aeApiState {
     int epfd;
-    struct epoll_event *events;
+    struct epoll_event *events; // 用于返回已就绪的 event
 } aeApiState;
 
+// 创建一个 epoll 实例，获得 epfd，保存结果到 eventLoop 中
 static int aeApiCreate(aeEventLoop *eventLoop) {
     aeApiState *state = zmalloc(sizeof(aeApiState));
 
-    if (!state) return -1;
+    if (!state) return -1; // 内存分配出错
     state->events = zmalloc(sizeof(struct epoll_event)*eventLoop->setsize);
     if (!state->events) {
         zfree(state);

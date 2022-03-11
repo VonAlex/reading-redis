@@ -45,6 +45,7 @@ proc exec_instance {type cfgfile} {
         error "Unknown instance type."
     }
 
+    # valgrind 检查
     if {$::valgrind} {
         set pid [exec valgrind --track-origins=yes --suppressions=../../../src/valgrind.sup --show-reachable=no --show-possibly-lost=no --leak-check=full ../../../src/${prgname} $cfgfile &]
     } else {
@@ -54,6 +55,7 @@ proc exec_instance {type cfgfile} {
 }
 
 # Spawn a redis or sentinel instance, depending on 'type'.
+# 产生多个 redis/sentinel 实例，保存到 $::${type}_instances
 proc spawn_instance {type base_port count {conf {}}} {
     for {set j 0} {$j < $count} {incr j} {
         set port [find_available_port $base_port]
@@ -83,6 +85,7 @@ proc spawn_instance {type base_port count {conf {}}} {
         lappend ::pids $pid
 
         # Check availability
+        # 通过 redis ping 检查实例是否正常启动
         if {[server_is_up 127.0.0.1 $port 100] == 0} {
             abort_sentinel_test "Problems starting $type #$j: ping timeout"
         }
@@ -139,6 +142,8 @@ proc parse_options {} {
     for {set j 0} {$j < [llength $::argv]} {incr j} {
         set opt [lindex $::argv $j]
         set val [lindex $::argv [expr $j+1]]
+
+        # 只跑某个特定的单元测试
         if {$opt eq "--single"} {
             incr j
             set ::run_matching "*${val}*"
@@ -146,6 +151,8 @@ proc parse_options {} {
             set ::pause_on_error 1
         } elseif {$opt eq "--fail"} {
             set ::simulate_error 1
+
+        # 需要做 valgrind 内存泄漏检测
         } elseif {$opt eq {--valgrind}} {
             set ::valgrind 1
         } elseif {$opt eq "--help"} {
@@ -268,6 +275,7 @@ proc test {descr code} {
 }
 
 # Check memory leaks when running on OSX using the "leaks" utility.
+# 仅在 mac 下生效, 使用命令 leaks pid
 proc check_leaks instance_types {
     if {[string match {*Darwin*} [exec uname -a]]} {
         puts -nonewline "Testing for memory leaks..."; flush stdout
@@ -302,12 +310,18 @@ proc check_leaks instance_types {
 proc run_tests {} {
     set tests [lsort [glob ../tests/*]]
     foreach test $tests {
+        # ::run_matching 不为空时，指定了要跑的特定单元测试
         if {$::run_matching ne {} && [string match $::run_matching $test] == 0} {
             continue
         }
+        # 跳过目录
         if {[file isdirectory $test]} continue
         puts [colorstr yellow "Testing unit: [lindex [file split $test] end]"]
+
+        # 执行单元测试
         source $test
+
+        # mac 下检查内存泄漏
         check_leaks {redis sentinel}
     }
 }
@@ -335,6 +349,7 @@ proc S {n args} {
 }
 
 # Like R but to chat with Redis instances.
+# 给 redis 实例发命令
 proc R {n args} {
     set r [lindex $::redis_instances $n]
     [dict get $r link] {*}$args
@@ -356,6 +371,7 @@ proc SI {n field} {
     get_info_field [S $n info] $field
 }
 
+# 给 redis 实例发 info 命令获得 filed 的值
 proc RI {n field} {
     get_info_field [R $n info] $field
 }
@@ -498,6 +514,7 @@ proc restart_instance {type id} {
 
     # Make sure the instance is not loading the dataset when this
     # function returns.
+    # 确保 redis 实例正常启动，等待 laod 数据完成
     while 1 {
         catch {[$link ping]} retval
         if {[string match {*LOADING*} $retval]} {
@@ -508,4 +525,3 @@ proc restart_instance {type id} {
         }
     }
 }
-

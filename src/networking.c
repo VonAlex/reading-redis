@@ -35,14 +35,19 @@ static void setProtocolError(client *c, int pos);
 
 /* Return the size consumed from the allocator, for the specified SDS string,
  * including internal fragmentation. This function is used in order to compute
- * the client output buffer size. */
+ * the client output buffer size.
+ * 返回分配器消费的内存大小，包括内部碎片。
+ * 该函数在计算 client output buffer 大小时使用。
+ */
 size_t sdsZmallocSize(sds s) {
     void *sh = sdsAllocPtr(s);
     return zmalloc_size(sh);
 }
 
 /* Return the amount of memory used by the sds string at object->ptr
- * for a string object. */
+ * for a string object. 
+ * 返回 sds 字符串在 object->ptr 处使用到的内存量
+ * */
 size_t getStringObjectSdsUsedMemory(robj *o) {
     serverAssertWithInfo(NULL,o,o->type == OBJ_STRING);
     switch(o->encoding) {
@@ -68,13 +73,15 @@ client *createClient(int fd) {
      * This is useful since all the commands needs to be executed
      * in the context of a client. When commands are executed in other
      * contexts (for instance a Lua script) we need a non connected client. */
+
+    // fd = -1 时，会创建一个 fake 客户端，有助于在一个 client 的上下文里执行命令。
     if (fd != -1) {
         anetNonBlock(NULL,fd);
         anetEnableTcpNoDelay(NULL,fd);
         if (server.tcpkeepalive)
             anetKeepAlive(NULL,fd,server.tcpkeepalive);
         if (aeCreateFileEvent(server.el,fd,AE_READABLE,
-            readQueryFromClient, c) == AE_ERR)
+            readQueryFromClient, c) == AE_ERR) // 为 cfd 注册可读事件，回调函数为 readQueryFromClient
         {
             close(fd);
             zfree(c);
@@ -132,45 +139,62 @@ client *createClient(int fd) {
 
 /* This function is called every time we are going to transmit new data
  * to the client. The behavior is the following:
+ * 该函数在每次我们要给 client 发送数据时调用
  *
  * If the client should receive new data (normal clients will) the function
  * returns C_OK, and make sure to install the write handler in our event
  * loop so that when the socket is writable new data gets written.
+ * 如果 client 应当收到新数据（ 正常 client ），该函数返回 C_OK。
+ * 确保在 eventloop 中注册写处理函数，当 socket 可写时，新数据可以写入。
  *
  * If the client should not receive new data, because it is a fake client
  * (used to load AOF in memory), a master or because the setup of the write
  * handler failed, the function returns C_ERR.
- *
+ * 如果 client 不应该接收新数据，因为它是一个假的 client（ 在内存中 load aof 时使用 ）
+ * 一个 master 或者由于注册写处理函数失败，该函数返回 C_ERR。
+ * 
  * The function may return C_OK without actually installing the write
  * event handler in the following cases:
+ * 本函数也可以在不注册写事件处理函数的情况下返回 C_OK，仅以下情况可能发生：
  *
  * 1) The event handler should already be installed since the output buffer
  *    already contained something.
+ * 由于输出缓冲区中已有数据，这个事件已经被注册
+ * 
  * 2) The client is a slave but not yet online, so we want to just accumulate
  *    writes in the buffer but not actually sending them yet.
+ * client 是一个 slave，且未上线，所以我们只是想在 buffer 中累计数据，实际上不发送。
  *
  * Typically gets called every time a reply is built, before adding more
  * data to the clients output buffers. If the function returns C_ERR no
- * data should be appended to the output buffers. */
+ * data should be appended to the output buffers. 
+ * 通常，每次构建 reply 时，都会在往 client 输出缓冲区中添加更多数据之前调用，
+ * 该函数如果返回 C_ERR，那么将不会有数据加到输出缓冲区。
+ * */
 int prepareClientToWrite(client *c) {
     /* If it's the Lua client we always return ok without installing any
      * handler since there is no socket at all. */
+    // 因为 lua client 根本没有 socket，所以不会注册事件，总是返回 ok
     if (c->flags & CLIENT_LUA) return C_OK;
 
     /* CLIENT REPLY OFF / SKIP handling: don't send replies. */
+    // 某些标识的 client，不要发送 reply
     if (c->flags & (CLIENT_REPLY_OFF|CLIENT_REPLY_SKIP)) return C_ERR;
 
     /* Masters don't receive replies, unless CLIENT_MASTER_FORCE_REPLY flag
      * is set. */
+    // master 不接收 reply，除非带有 CLIENT_MASTER_FORCE_REPLY 标识
     if ((c->flags & CLIENT_MASTER) &&
         !(c->flags & CLIENT_MASTER_FORCE_REPLY)) return C_ERR;
 
+    // fake client fd <= 0，不需要发送 reply
     if (c->fd <= 0) return C_ERR; /* Fake client for AOF loading. */
 
     /* Schedule the client to write the output buffers to the socket only
      * if not already done (there were no pending writes already and the client
      * was yet not flagged), and, for slaves, if the slave can actually
-     * receive writes at this stage. */
+     * receive writes at this stage. 
+     */
     if (!clientHasPendingReplies(c) &&
         !(c->flags & CLIENT_PENDING_WRITE) &&
         (c->replstate == REPL_STATE_NONE ||
@@ -181,7 +205,12 @@ int prepareClientToWrite(client *c) {
          * to write to the socket. This way before re-entering the event
          * loop, we can try to directly write to the client sockets avoiding
          * a system call. We'll only really install the write handler if
-         * we'll not be able to write the whole reply at once. */
+         * we'll not be able to write the whole reply at once. 
+         * 这里仅仅把 client 做个标识，并把它放入 clients 列表中，这个列表中 client 都会有一些东西需要往 socket 写入，
+         * 而不会直接注册写事件处理函数。
+         * 在重新进入事件循环之前使用这种方式，我们可以尝试直接写入到 client socket，避免了系统调用。
+         * 如果我们不能一次写入所有的 reply，将注册写事件处理函数。
+         * */
         c->flags |= CLIENT_PENDING_WRITE;
         listAddNodeHead(server.clients_pending_write,c);
     }
@@ -216,10 +245,14 @@ int _addReplyToBuffer(client *c, const char *s, size_t len) {
     if (c->flags & CLIENT_CLOSE_AFTER_REPLY) return C_OK;
 
     /* If there already are entries in the reply list, we cannot
-     * add anything more to the static buffer. */
+     * add anything more to the static buffer. 
+     * 如果在回复列表里已经有 entries 了，我们不能往 static buffer 里加东西了
+     */
     if (listLength(c->reply) > 0) return C_ERR;
 
-    /* Check that the buffer has enough space available for this string. */
+    /* Check that the buffer has enough space available for this string. 
+     * 检查 buffer 是否有足够的空间来容纳这个字符串
+     */
     if (len > available) return C_ERR;
 
     memcpy(c->buf+c->bufpos,s,len);
@@ -332,17 +365,24 @@ void addReply(client *c, robj *obj) {
     /* This is an important place where we can avoid copy-on-write
      * when there is a saving child running, avoiding touching the
      * refcount field of the object if it's not needed.
+     * 当有一个子进程在跑时，这是一个避免 copy-on-write 很重要的地方，
+     * 避免操作 object 的 refcount 变量，除非是必须的。
      *
      * If the encoding is RAW and there is room in the static buffer
      * we'll be able to send the object to the client without
-     * messing with its page. */
+     * messing with its page. 
+     * 如果 encoding 是 RAW，并且在 static buffer 中有空间，我们可以在不弄脏其他 page 的情况下
+     * 将 object 发到 client，
+     */
     if (sdsEncodedObject(obj)) {
         if (_addReplyToBuffer(c,obj->ptr,sdslen(obj->ptr)) != C_OK)
             _addReplyObjectToList(c,obj);
     } else if (obj->encoding == OBJ_ENCODING_INT) {
         /* Optimization: if there is room in the static buffer for 32 bytes
          * (more than the max chars a 64 bit integer can take as string) we
-         * avoid decoding the object and go for the lower level approach. */
+         * avoid decoding the object and go for the lower level approach. 
+         * 优化：如果在静态 buffer 里有 32 字节的空间，我们可以避免 decoding object，并直接走 lower level 接口。
+         */
         if (listLength(c->reply) == 0 && (sizeof(c->buf) - c->bufpos) >= 32) {
             char buf[32];
             int len;
@@ -523,8 +563,8 @@ void addReplyLongLong(client *c, long long ll) {
 }
 
 void addReplyMultiBulkLen(client *c, long length) {
-    if (length < OBJ_SHARED_BULKHDR_LEN)
-        addReply(c,shared.mbulkhdr[length]);
+    if (length < OBJ_SHARED_BULKHDR_LEN) // 长度为 32
+        addReply(c,shared.mbulkhdr[length]); // *length
     else
         addReplyLongLongWithPrefix(c,length,'*');
 }
@@ -613,9 +653,11 @@ int clientHasPendingReplies(client *c) {
 }
 
 #define MAX_ACCEPTS_PER_CALL 1000
+
+// TCP 连接处理程序，创建一个client的连接状态
 static void acceptCommonHandler(int fd, int flags, char *ip) {
     client *c;
-    if ((c = createClient(fd)) == NULL) {
+    if ((c = createClient(fd)) == NULL) { // 创建一个客户端
         serverLog(LL_WARNING,
             "Error registering fd event for the new client: %s (fd=%d)",
             strerror(errno),fd);
@@ -626,6 +668,8 @@ static void acceptCommonHandler(int fd, int flags, char *ip) {
      * connection. Note that we create the client instead to check before
      * for this condition, since now the socket is already set in non-blocking
      * mode and we can send an error for free using the Kernel I/O */
+
+    // 连接数是否超限
     if (listLength(server.clients) > server.maxclients) {
         char *err = "-ERR max number of clients reached\r\n";
 
@@ -633,6 +677,7 @@ static void acceptCommonHandler(int fd, int flags, char *ip) {
         if (write(c->fd,err,strlen(err)) == -1) {
             /* Nothing to do, Just to avoid the warning... */
         }
+        // 更新拒接连接的个数，释放 client
         server.stat_rejected_conn++;
         freeClient(c);
         return;
@@ -678,20 +723,21 @@ static void acceptCommonHandler(int fd, int flags, char *ip) {
             return;
         }
     }
-
+    // 更新连接的数量
     server.stat_numconnections++;
     c->flags |= flags;
 }
 
 void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
-    int cport, cfd, max = MAX_ACCEPTS_PER_CALL;
+    int cport, cfd, max = MAX_ACCEPTS_PER_CALL; // 一个处理最多处理1000次连接
     char cip[NET_IP_STR_LEN];
     UNUSED(el);
     UNUSED(mask);
     UNUSED(privdata);
 
     while(max--) {
-        cfd = anetTcpAccept(server.neterr, fd, cip, sizeof(cip), &cport);
+        // 非阻塞 accept，不会影响用户下一次请求
+        cfd = anetTcpAccept(server.neterr, fd, cip, sizeof(cip), &cport); // 接收用户请求
         if (cfd == ANET_ERR) {
             if (errno != EWOULDBLOCK)
                 serverLog(LL_WARNING,
@@ -788,9 +834,12 @@ void freeClient(client *c) {
 
     /* If it is our master that's beging disconnected we should make sure
      * to cache the state to try a partial resynchronization later.
-     *
+     * 如果是我们的 master 要断开连接，应该确保缓存 client 状态，以便做部分重同步。
+     * 
      * Note that before doing this we make sure that the client is not in
-     * some unexpected state, by checking its flags. */
+     * some unexpected state, by checking its flags. 
+     * 注意，在缓存之前，需要确保处理 client 不处于一些非预期的状态
+     * */
     if (server.master && c->flags & CLIENT_MASTER) {
         serverLog(LL_WARNING,"Connection with master lost.");
         if (!(c->flags & (CLIENT_CLOSE_AFTER_REPLY|
@@ -804,6 +853,7 @@ void freeClient(client *c) {
     }
 
     /* Log link disconnection with slave */
+    // slave 而非 monitor 
     if ((c->flags & CLIENT_SLAVE) && !(c->flags & CLIENT_MONITOR)) {
         serverLog(LL_WARNING,"Connection with slave %s lost.",
             replicationGetSlaveName(c));
@@ -907,13 +957,15 @@ int writeToClient(int fd, client *c, int handler_installed) {
 
     while(clientHasPendingReplies(c)) {
         if (c->bufpos > 0) {
+            // 向 fd 里写入 c->bufpos-c->sentlen 个字节
             nwritten = write(fd,c->buf+c->sentlen,c->bufpos-c->sentlen);
             if (nwritten <= 0) break;
-            c->sentlen += nwritten;
-            totwritten += nwritten;
+            c->sentlen += nwritten; // 已发送的数据长度累计
+            totwritten += nwritten; // 总长度
 
             /* If the buffer was sent, set bufpos to zero to continue with
              * the remainder of the reply. */
+             // buffer 都发送完了
             if ((int)c->sentlen == c->bufpos) {
                 c->bufpos = 0;
                 c->sentlen = 0;
@@ -941,14 +993,21 @@ int writeToClient(int fd, client *c, int handler_installed) {
                 c->reply_bytes -= objmem;
             }
         }
-        /* Note that we avoid to send more than NET_MAX_WRITES_PER_EVENT
-         * bytes, in a single threaded server it's a good idea to serve
-         * other clients as well, even if a very large request comes from
-         * super fast link that is always able to accept data (in real world
+        /* Note that we avoid to send more than NET_MAX_WRITES_PER_EVENT bytes, 
+         * 注意：最大发送的数据量为 NET_MAX_WRITES_PER_EVENT 个字节，即 64KB
+         *
+         * in a single threaded server it's a good idea to serve other clients as well, 
+         * even if a very large request comes from super fast link 
+         * that is always able to accept data (in real world
          * scenario think about 'KEYS *' against the loopback interface).
+         * 对于一个单线程服务，最好同时服务其他 client，即使来自于总是能够接受数据的超快链接的一个很大的请求。
+         * 现实场景下，考虑 KEYS * 命令
          *
          * However if we are over the maxmemory limit we ignore that and
-         * just deliver as much data as it is possible to deliver. */
+         * just deliver as much data as it is possible to deliver. 
+         * 然而，如果我们超出了 maxmemory 限制，我们应该忽略这个限制，而尽量提供多的数据，
+         * 即，尽快把数据发出去。
+         */
         server.stat_net_output_bytes += totwritten;
         if (totwritten > NET_MAX_WRITES_PER_EVENT &&
             (server.maxmemory == 0 ||
@@ -994,12 +1053,16 @@ void sendReplyToClient(aeEventLoop *el, int fd, void *privdata, int mask) {
 /* This function is called just before entering the event loop, in the hope
  * we can just write the replies to the client output buffer without any
  * need to use a syscall in order to install the writable event handler,
- * get it called, and so forth. */
+ * get it called, and so forth. 
+ * 该函数仅仅在进入 eventloop 前调用，希望我们仅仅把 replies 写入 client 输出缓冲区，
+ * 而不必使用任何 syscall 来注册可写事件处理器，调用它，等等
+ * */
 int handleClientsWithPendingWrites(void) {
     listIter li;
     listNode *ln;
     int processed = listLength(server.clients_pending_write);
 
+    // 一次处理完所有等待回复的 client
     listRewind(server.clients_pending_write,&li);
     while((ln = listNext(&li))) {
         client *c = listNodeValue(ln);
@@ -1007,10 +1070,13 @@ int handleClientsWithPendingWrites(void) {
         listDelNode(server.clients_pending_write,ln);
 
         /* Try to write buffers to the client socket. */
+
+        // 往 socket 写数据
         if (writeToClient(c->fd,c,0) == C_ERR) continue;
 
         /* If there is nothing left, do nothing. Otherwise install
          * the write handler. */
+        // 如果没有写完，注册写事件进行处理
         if (clientHasPendingReplies(c) &&
             aeCreateFileEvent(server.el, c->fd, AE_WRITABLE,
                 sendReplyToClient, c) == AE_ERR)
@@ -1119,6 +1185,11 @@ static void setProtocolError(client *c, int pos) {
     sdsrange(c->querybuf,pos,-1);
 }
 
+// 设置 client c 的 query buffer，设置 command 执行所需要的参数向量
+// 如果运行该函数后，client 拥有了格式正确的要执行的命令，返回 C_OK，
+// 如果还需要读更多的 buffer 来获得完整的命令，返回 C_ERR。
+// 如果协议有错误，也会返回 C_ERR。
+// 将 client 的 querybuf 中的协议内容转换为 client 的参数列表中的对象
 int processMultibulkBuffer(client *c) {
     char *newline = NULL;
     int pos = 0, ok;
@@ -1139,30 +1210,35 @@ int processMultibulkBuffer(client *c) {
         }
 
         /* Buffer should also contain \n */
+        // buffer 必须包含 \n
         if (newline-(c->querybuf) > ((signed)sdslen(c->querybuf)-2))
             return C_ERR;
 
         /* We know for sure there is a whole line since newline != NULL,
-         * so go ahead and find out the multi bulk length. */
+         * so go ahead and find out the multi bulk length. 
+         */
+        // querybuf 第一个字符必须是 *
         serverAssertWithInfo(c,NULL,c->querybuf[0] == '*');
+
+        // 将'*'之后的数字转换为整数。如，*3\r\n，ll 取值为 3
         ok = string2ll(c->querybuf+1,newline-(c->querybuf+1),&ll);
-        if (!ok || ll > 1024*1024) {
+        if (!ok || ll > 1024*1024) { // 限制 multibulk，不能超过 1024*1024
             addReplyError(c,"Protocol error: invalid multibulk length");
             setProtocolError(c,pos);
             return C_ERR;
         }
-
+        // pos 指向参数的第一个字节,如 *3\r\n$3\r\nSET...，pos 指向 $ 字符
         pos = (newline-c->querybuf)+2;
         if (ll <= 0) {
             sdsrange(c->querybuf,pos,-1);
             return C_OK;
         }
 
-        c->multibulklen = ll;
+        c->multibulklen = ll; // bulk 大小，*3\r\n 就表示后面有 3 个参数
 
         /* Setup argv array on client structure */
         if (c->argv) zfree(c->argv);
-        c->argv = zmalloc(sizeof(robj*)*c->multibulklen);
+        c->argv = zmalloc(sizeof(robj*)*c->multibulklen); // c->argv 存放参数个数，分配 multibulklen 个 robj 内存
     }
 
     serverAssertWithInfo(c,NULL,c->multibulklen > 0);
@@ -1184,6 +1260,7 @@ int processMultibulkBuffer(client *c) {
             if (newline-(c->querybuf) > ((signed)sdslen(c->querybuf)-2))
                 break;
 
+            // 参数部分第一个字符必须是 $,如 $3\r\nSET\r\n...
             if (c->querybuf[pos] != '$') {
                 addReplyErrorFormat(c,
                     "Protocol error: expected '$', got '%c'",
@@ -1192,21 +1269,25 @@ int processMultibulkBuffer(client *c) {
                 return C_ERR;
             }
 
+            // 当前参数的长度，如 $3\r\nSET\r\n...，SET 参数的长度是 3
             ok = string2ll(c->querybuf+pos+1,newline-(c->querybuf+pos+1),&ll);
-            if (!ok || ll < 0 || ll > 512*1024*1024) {
+            if (!ok || ll < 0 || ll > 512*1024*1024) { // 限制参数的大小不超过 512M
                 addReplyError(c,"Protocol error: invalid bulk length");
                 setProtocolError(c,pos);
                 return C_ERR;
             }
 
-            pos += newline-(c->querybuf+pos)+2;
-            if (ll >= PROTO_MBULK_BIG_ARG) {
+            pos += newline-(c->querybuf+pos)+2; // 下一个参数的起始位置
+            if (ll >= PROTO_MBULK_BIG_ARG) { // 32K 算大 object
                 size_t qblen;
 
                 /* If we are going to read a large object from network
                  * try to make it likely that it will start at c->querybuf
                  * boundary so that we can optimize object creation
-                 * avoiding a large copy of data. */
+                 * avoiding a large copy of data.
+                 * 如果我们要从网络读取一个大的 object，试着从 c->querybuf 边界开始读，
+                 * 以便我们可以优化 object 创建，避免大量数据复制。
+                 */
                 sdsrange(c->querybuf,pos,-1);
                 pos = 0;
                 qblen = sdslen(c->querybuf);
@@ -1215,17 +1296,20 @@ int processMultibulkBuffer(client *c) {
                 if (qblen < (size_t)ll+2)
                     c->querybuf = sdsMakeRoomFor(c->querybuf,ll+2-qblen);
             }
-            c->bulklen = ll;
+            c->bulklen = ll; // 当前参数长度为 ll
         }
 
         /* Read bulk argument */
-        if (sdslen(c->querybuf)-pos < (unsigned)(c->bulklen+2)) {
+        if (sdslen(c->querybuf)-pos < (unsigned)(c->bulklen+2)) { // 没有足够数据了
             /* Not enough data (+2 == trailing \r\n) */
             break;
         } else {
             /* Optimization: if the buffer contains JUST our bulk element
              * instead of creating a new object by *copying* the sds we
-             * just use the current sds string. */
+             * just use the current sds string. 
+             * 优化：如果 buffer 仅包含 bulk 元素。
+             * 使用现有的 sds，而不是通过 copy sds 创建一个新的 object
+             */
             if (pos == 0 &&
                 c->bulklen >= PROTO_MBULK_BIG_ARG &&
                 (signed) sdslen(c->querybuf) == c->bulklen+2)
@@ -1238,19 +1322,24 @@ int processMultibulkBuffer(client *c) {
                 sdsclear(c->querybuf);
                 pos = 0;
             } else {
+                // 创建对象保存在client的参数列表中
                 c->argv[c->argc++] =
                     createStringObject(c->querybuf+pos,c->bulklen);
                 pos += c->bulklen+2;
             }
+            // 清空命令内容的长度
             c->bulklen = -1;
+            // 未读取命令参数的数量，读取一个，该值减1
             c->multibulklen--;
         }
     }
 
     /* Trim to pos */
+    // 删除已经读取的，保留未读取的
     if (pos) sdsrange(c->querybuf,pos,-1);
 
     /* We're done when c->multibulk == 0 */
+    // 命令的参数全部被读取完
     if (c->multibulklen == 0) return C_OK;
 
     /* Still not read to process the command */
@@ -1277,6 +1366,7 @@ void processInputBuffer(client *c) {
         /* Determine request type when unknown. */
         if (!c->reqtype) {
             if (c->querybuf[0] == '*') {
+                // 如 *2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n
                 c->reqtype = PROTO_REQ_MULTIBULK;
             } else {
                 c->reqtype = PROTO_REQ_INLINE;
@@ -1306,6 +1396,8 @@ void processInputBuffer(client *c) {
     server.current_client = NULL;
 }
 
+// 读取 client 的输入缓冲区的内容
+// *multibulklen\r\n$bulklen\r\n....\r\n$bulklen\r\n.....\r\n
 void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     client *c = (client*) privdata;
     int nread, readlen;
@@ -1313,13 +1405,20 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     UNUSED(el);
     UNUSED(mask);
 
+    // 默认读取的数据长度 16K
     readlen = PROTO_IOBUF_LEN;
     /* If this is a multi bulk request, and we are processing a bulk reply
      * that is large enough, try to maximize the probability that the query
      * buffer contains exactly the SDS string representing the object, even
-     * at the risk of requiring more read(2) calls. This way the function
-     * processMultiBulkBuffer() can avoid copying buffers to create the
-     * Redis Object representing the argument. */
+     * at the risk of requiring more read(2) calls. 
+     * 如果这是一个批量请求，且我们正在处理足够大的批量回复，尽量让 query buffer 恰好包含代表 object 的 sds 字符串，
+     * 甚至不惜冒着需要调用更多 read(2) 的风险。
+     *
+     * This way the function processMultiBulkBuffer() can avoid copying buffers to create the
+     * Redis Object representing the argument. 
+     * 用这种方式，processMultiBulkBuffer() 可以避免拷贝 buffers 来创建参数表示的 Redis Object。
+     */
+     // *1\r\n\$7\r\nCOMMAND\r\n
     if (c->reqtype == PROTO_REQ_MULTIBULK && c->multibulklen && c->bulklen != -1
         && c->bulklen >= PROTO_MBULK_BIG_ARG)
     {
@@ -1330,8 +1429,10 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     qblen = sdslen(c->querybuf);
     if (c->querybuf_peak < qblen) c->querybuf_peak = qblen;
+    
+    // 读 readlen 的数据放到 c->querybuf
     c->querybuf = sdsMakeRoomFor(c->querybuf, readlen);
-    nread = read(fd, c->querybuf+qblen, readlen);
+    nread = read(fd, c->querybuf+qblen, readlen); 
     if (nread == -1) {
         if (errno == EAGAIN) {
             return;
@@ -1348,9 +1449,10 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     sdsIncrLen(c->querybuf,nread);
     c->lastinteraction = server.unixtime;
+
     if (c->flags & CLIENT_MASTER) c->reploff += nread;
     server.stat_net_input_bytes += nread;
-    if (sdslen(c->querybuf) > server.client_max_querybuf_len) {
+    if (sdslen(c->querybuf) > server.client_max_querybuf_len) { // 不能大于 1G
         sds ci = catClientInfoString(sdsempty(),c), bytes = sdsempty();
 
         bytes = sdscatrepr(bytes,c->querybuf,64);
@@ -1732,19 +1834,27 @@ void rewriteClientCommandArgument(client *c, int i, robj *newval) {
 
 /* This function returns the number of bytes that Redis is virtually
  * using to store the reply still not read by the client.
+ * 这个函数返回 redis 用来存储还没有被 client 读取的虚拟字节数
+ *
  * It is "virtual" since the reply output list may contain objects that
  * are shared and are not really using additional memory.
+ * 之所以说“虚拟”，是由于 reply output 列表中可能含有一些对象是共享的，这部分对象不占用额外内存
  *
  * The function returns the total sum of the length of all the objects
  * stored in the output list, plus the memory used to allocate every
  * list node. The static reply buffer is not taken into account since it
  * is allocated anyway.
+ * 这个函数返回 output 列表中所有 objects 的长度总和，加上每个 list 节点分配的内存。
+ * 静态的 reply buffer 不计数是由于它总是要分配的。
  *
  * Note: this function is very fast so can be called as many time as
  * the caller wishes. The main usage of this function currently is
- * enforcing the client output length limits. */
+ * enforcing the client output length limits.
+ * 注意：这个函数非常快，因此调用者想用多少次就调用多少次。
+ * 此函数现在的主要用处是获得 client output 长度限制。
+ * */
 unsigned long getClientOutputBufferMemoryUsage(client *c) {
-    unsigned long list_item_size = sizeof(listNode)+sizeof(robj);
+    unsigned long list_item_size = sizeof(listNode)+sizeof(robj); // 每个 list node 的大小
 
     return c->reply_bytes + (list_item_size*listLength(c->reply));
 }
@@ -1831,10 +1941,15 @@ int checkClientOutputBufferLimits(client *c) {
 /* Asynchronously close a client if soft or hard limit is reached on the
  * output buffer size. The caller can check if the client will be closed
  * checking if the client CLIENT_CLOSE_ASAP flag is set.
+ * 如果软或硬限制达到了 output buffer 大小， 异步关闭一个 client。
+ * 通过检查 client 是否带有 CLIENT_CLOSE_ASAP 标识，caller 可以检查是否关闭这个 client 
  *
  * Note: we need to close the client asynchronously because this function is
  * called from contexts where the client can't be freed safely, i.e. from the
- * lower level functions pushing data inside the client output buffers. */
+ * lower level functions pushing data inside the client output buffers. 
+ * 注意：我们应该异步关闭 client，因为该函数在 client 不能被安全 free 的上下文中调用，
+ * 比如，从 lower level 函数在 client output buffers 内部 push data
+ * */
 void asyncCloseClientOnOutputBufferLimitReached(client *c) {
     serverAssert(c->reply_bytes < SIZE_MAX-(1024*64));
     if (c->reply_bytes == 0 || c->flags & CLIENT_CLOSE_ASAP) return;
@@ -1879,20 +1994,29 @@ void flushSlavesOutputBuffers(void) {
 /* Pause clients up to the specified unixtime (in ms). While clients
  * are paused no command is processed from clients, so the data set can't
  * change during that time.
+ * 阻塞 clients 特定的时间(ms)。
+ * 当 clients 被暂停时，来自 clients 的 command 都不会被处理，所以数据集在这段时间内不能变
  *
  * However while this function pauses normal and Pub/Sub clients, slaves are
  * still served, so this function can be used on server upgrades where it is
  * required that slaves process the latest bytes from the replication stream
  * before being turned to masters.
+ * 然而，当这个函数暂停正常或 Pub/Sub clients 时，slave 仍然接受服务，因此，在发生主从切换时，
+ * slave 转变为 master 之前需要处理来自 replication stream 最新的字节，这个函数就要使用了。
  *
  * This function is also internally used by Redis Cluster for the manual
  * failover procedure implemented by CLUSTER FAILOVER.
+ * 这个函数被 Redis Cluster 内部使用，用于 CLUSTER FAILOVER 命令实现的 mf 流程。
  *
  * The function always succeed, even if there is already a pause in progress.
  * In such a case, the pause is extended if the duration is more than the
  * time left for the previous duration. However if the duration is smaller
  * than the time left for the previous pause, no change is made to the
- * left duration. */
+ * left duration.
+ * 这个函数总会成功，即使在进程中有 pause 了。
+ * 在这样一个 case 里，如果持续时间大于上一个 duration 剩余的时间，则 pause 会延长。
+ * 反之，剩余的 duration 不会发生改变
+ *  */
 void pauseClients(mstime_t end) {
     if (!server.clients_paused || end > server.clients_pause_end_time)
         server.clients_pause_end_time = end;

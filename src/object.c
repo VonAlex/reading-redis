@@ -296,6 +296,7 @@ void incrRefCount(robj *o) {
     o->refcount++;
 }
 
+// object 引用减一，减到 0 就释放内存
 void decrRefCount(robj *o) {
     if (o->refcount <= 0) serverPanic("decrRefCount against refcount <= 0");
     if (o->refcount == 1) {
@@ -356,6 +357,7 @@ int isObjectRepresentableAsLongLong(robj *o, long long *llval) {
 }
 
 /* Try to encode a string object in order to save space */
+// 为节省内存，尝试编码一个字符串对象
 robj *tryObjectEncoding(robj *o) {
     long value;
     sds s = o->ptr;
@@ -370,22 +372,26 @@ robj *tryObjectEncoding(robj *o) {
     /* We try some specialized encoding only for objects that are
      * RAW or EMBSTR encoded, in other words objects that are still
      * in represented by an actually array of chars. */
+     // 仅对于 RAW or EMBSTR 类型的字符串进行编码
     if (!sdsEncodedObject(o)) return o;
 
     /* It's not safe to encode shared objects: shared objects can be shared
      * everywhere in the "object space" of Redis and may end in places where
      * they are not handled. We handle them only as values in the keyspace. */
+     // 共享字符串编码有风险
      if (o->refcount > 1) return o;
 
     /* Check if we can represent this string as a long integer.
      * Note that we are sure that a string larger than 20 chars is not
      * representable as a 32 nor 64 bit integer. */
     len = sdslen(s);
+    // 长度小于 20
     if (len <= 20 && string2l(s,len,&value)) {
         /* This object is encodable as a long. Try to use a shared object.
          * Note that we avoid using shared integers when maxmemory is used
          * because every object needs to have a private LRU field for the LRU
          * algorithm to work well. */
+         // 使用 LRU 淘汰策略的每个对象都需要一个私有的 LRU，不能使用共享对象
         if ((server.maxmemory == 0 ||
              (server.maxmemory_policy != MAXMEMORY_VOLATILE_LRU &&
               server.maxmemory_policy != MAXMEMORY_ALLKEYS_LRU)) &&
@@ -407,6 +413,7 @@ robj *tryObjectEncoding(robj *o) {
      * try the EMBSTR encoding which is more efficient.
      * In this representation the object and the SDS string are allocated
      * in the same chunk of memory to save space and cache misses. */
+     // 20 <len < 44
     if (len <= OBJ_ENCODING_EMBSTR_SIZE_LIMIT) {
         robj *emb;
 
@@ -428,7 +435,7 @@ robj *tryObjectEncoding(robj *o) {
     if (o->encoding == OBJ_ENCODING_RAW &&
         sdsavail(s) > len/10)
     {
-        o->ptr = sdsRemoveFreeSpace(o->ptr);
+        o->ptr = sdsRemoveFreeSpace(o->ptr); // 尝试优化 sds
     }
 
     /* Return the original object. */
@@ -677,11 +684,12 @@ char *strEncoding(int encoding) {
 
 /* Given an object returns the min number of milliseconds the object was never
  * requested, using an approximated LRU algorithm. */
+// 使用近似 LRU 算法，计算出给定对象的闲置时长(毫秒)
 unsigned long long estimateObjectIdleTime(robj *o) {
     unsigned long long lruclock = LRU_CLOCK();
     if (lruclock >= o->lru) {
         return (lruclock - o->lru) * LRU_CLOCK_RESOLUTION;
-    } else {
+    } else {// 这种情况一般不会发生，key 长时间不访问，LRU 时间发生了 wrap
         return (lruclock + (LRU_CLOCK_MAX - o->lru)) *
                     LRU_CLOCK_RESOLUTION;
     }
@@ -724,4 +732,3 @@ void objectCommand(client *c) {
         addReplyError(c,"Syntax error. Try OBJECT (refcount|encoding|idletime)");
     }
 }
-

@@ -252,6 +252,7 @@ proc createComplexDataset {r ops {opt {}}} {
     }
 }
 
+# 将命令转成 resp 协议格式
 proc formatCommand {args} {
     set cmd "*[llength $args]\r\n"
     foreach a $args {

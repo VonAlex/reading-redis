@@ -704,6 +704,7 @@ int rdbSaveKeyValuePair(rio *rdb, robj *key, robj *val,
                         long long expiretime, long long now)
 {
     /* Save the expire time */
+    // master 跳过 expire 的 key，会导致主从 key 数量不一致
     if (expiretime != -1) {
         /* If this key is already expired skip it */
         if (expiretime < now) return 0;
@@ -787,7 +788,7 @@ int rdbSaveRio(rio *rdb, int *error) {
         /* Write the RESIZE DB opcode. We trim the size to UINT32_MAX, which
          * is currently the largest type we are able to represent in RDB sizes.
          * However this does not limit the actual size of the DB to load since
-         * these sizes are just hints to resize the hash tables. */
+        //  * these sizes are just hints to resize the hash tables. */
         uint32_t db_size, expires_size;
         db_size = (dictSize(db->dict) <= UINT32_MAX) ?
                                 dictSize(db->dict) :
@@ -830,7 +831,10 @@ werr:
 }
 
 /* This is just a wrapper to rdbSaveRio() that additionally adds a prefix
- * and a suffix to the generated RDB dump. The prefix is:
+ * and a suffix to the generated RDB dump. 
+ * 只是对 rdbSaveRio() 做了一个包装，额外增加了一个前缀和后缀。
+ * 
+ * The prefix is:
  *
  * $EOF:<40 bytes unguessable hex string>\r\n
  *
@@ -915,6 +919,7 @@ werr:
     return C_ERR;
 }
 
+// 做 bgsave
 int rdbSaveBackground(char *filename) {
     pid_t childpid;
     long long start;
@@ -1272,6 +1277,10 @@ void rdbLoadProgressCallback(rio *r, const void *buf, size_t len) {
     }
 }
 
+//   +-------+-------------+-----------+-----------------+-----+-----------+
+//   | REDIS | RDB-VERSION | SELECT-DB | KEY-VALUE-PAIRS | EOF | CHECK-SUM |
+//   +-------+-------------+-----------+-----------------+-----+-----------+
+
 int rdbLoad(char *filename) {
     uint32_t dbid;
     int type, rdbver;
@@ -1286,7 +1295,7 @@ int rdbLoad(char *filename) {
     rioInitWithFile(&rdb,fp);
     rdb.update_cksum = rdbLoadProgressCallback;
     rdb.max_processing_chunk = server.loading_process_events_interval_bytes;
-    if (rioRead(&rdb,buf,9) == 0) goto eoferr;
+    if (rioRead(&rdb,buf,9) == 0) goto eoferr;// 5字节 + 4字节
     buf[9] = '\0';
     if (memcmp(buf,"REDIS",5) != 0) {
         fclose(fp);
@@ -1294,7 +1303,7 @@ int rdbLoad(char *filename) {
         errno = EINVAL;
         return C_ERR;
     }
-    rdbver = atoi(buf+5);
+    rdbver = atoi(buf+5); // rdb 版本号，4 字节
     if (rdbver < 1 || rdbver > RDB_VERSION) {
         fclose(fp);
         serverLog(LL_WARNING,"Can't handle RDB format version %d",rdbver);
@@ -1575,7 +1584,9 @@ void backgroundSaveDoneHandler(int exitcode, int bysignal) {
 }
 
 /* Spawn an RDB child that writes the RDB to the sockets of the slaves
- * that are currently in SLAVE_STATE_WAIT_BGSAVE_START state. */
+ * that are currently in SLAVE_STATE_WAIT_BGSAVE_START state.
+ * 产生一个 RDB 子进程将 RDB 写入到目前处于 SLAVE_STATE_WAIT_BGSAVE_START 状态的 slave 的 socket 里 
+ */
 int rdbSaveToSlavesSockets(void) {
     int *fds;
     uint64_t *clientids;
@@ -1590,13 +1601,17 @@ int rdbSaveToSlavesSockets(void) {
 
     /* Before to fork, create a pipe that will be used in order to
      * send back to the parent the IDs of the slaves that successfully
-     * received all the writes. */
+     * received all the writes. 
+     * 在 fork 之前，创建一个 pipe，用来将成功接收到所有 write 的 slave id 返回给 parent 进程
+     * */
     if (pipe(pipefds) == -1) return C_ERR;
     server.rdb_pipe_read_result_from_child = pipefds[0];
     server.rdb_pipe_write_result_to_parent = pipefds[1];
 
     /* Collect the file descriptors of the slaves we want to transfer
-     * the RDB to, which are i WAIT_BGSAVE_START state. */
+     * the RDB to, which are in WAIT_BGSAVE_START state. 
+     * 收集我们想发送 RDB 的 slave 的 fd，即，处于 WAIT_BGSAVE_START 状态的
+     */
     fds = zmalloc(sizeof(int)*listLength(server.slaves));
     /* We also allocate an array of corresponding client IDs. This will
      * be useful for the child process in order to build the report
@@ -1675,7 +1690,11 @@ int rdbSaveToSlavesSockets(void) {
             /* Write the message to the parent. If we have no good slaves or
              * we are unable to transfer the message to the parent, we exit
              * with an error so that the parent will abort the replication
-             * process with all the childre that were waiting. */
+             * process with all the childre that were waiting. 
+             * 将 message 通知给父进程。
+             * 如果我们没有 good slaves 或者我们不能发送需不需给父进程，我们错误退出，
+             * 以便父进程放弃所有 slave 等待的 replication 过程。
+             * */
             msglen = sizeof(uint64_t)*(1+2*numfds);
             if (*len == 0 ||
                 write(server.rdb_pipe_write_result_to_parent,msg,msglen)
@@ -1720,6 +1739,7 @@ int rdbSaveToSlavesSockets(void) {
             server.rdb_save_time_start = time(NULL);
             server.rdb_child_pid = childpid;
             server.rdb_child_type = RDB_CHILD_TYPE_SOCKET;
+            // 有 fork 进程存在时，先不要做 rehash
             updateDictResizePolicy();
         }
         zfree(clientids);

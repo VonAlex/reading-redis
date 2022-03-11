@@ -64,6 +64,7 @@ proc wait_for_condition {maxtries delay e _else_ elsescript} {
     }
 }
 
+# 最后一个变量 okpattern 默认值为 undefined
 proc test {name code {okpattern undefined}} {
     # abort if tagged with a tag to deny
     foreach tag $::denytags {
@@ -99,6 +100,8 @@ proc test {name code {okpattern undefined}} {
             lappend ::tests_failed $details
 
             incr ::num_failed
+
+            # 告知 server 测试出错了，测试用例执行失败
             send_data_packet $::test_server_fd err [join $details "\n"]
         } else {
             # Re-raise, let handler up the stack take care of this.
@@ -107,12 +110,15 @@ proc test {name code {okpattern undefined}} {
     } else {
         if {$okpattern eq "undefined" || $okpattern eq $retval || [string match $okpattern $retval]} {
             incr ::num_passed
+
+            # 告知 server 测试成功了
             send_data_packet $::test_server_fd ok $name
         } else {
             set msg "Expected '$okpattern' to equal or match '$retval'"
             lappend details $msg
             lappend ::tests_failed $details
 
+            # 虽然执行测试没出问题，但是结果不符合预期，测试失败
             incr ::num_failed
             send_data_packet $::test_server_fd err [join $details "\n"]
         }

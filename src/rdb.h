@@ -36,8 +36,10 @@
 /* TBD: include only necessary headers. */
 #include "server.h"
 
-/* The current RDB version. When the format changes in a way that is no longer
- * backward compatible this number gets incremented. */
+/* The current RDB version. 
+ * When the format changes in a way that is no longer
+ * backward compatible this number gets incremented. 
+ */
 #define RDB_VERSION 7
 
 /* Defines related to the dump file format. To store 32 bits lengths for short

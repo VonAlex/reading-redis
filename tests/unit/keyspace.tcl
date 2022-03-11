@@ -1,3 +1,5 @@
+# option -> {tags {"keyspace"}}
+# code -> {....}
 start_server {tags {"keyspace"}} {
     test {DEL against a single item} {
         r set x foo

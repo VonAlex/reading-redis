@@ -165,7 +165,10 @@ typedef long long mstime_t; /* millisecond time type. */
 /* When configuring the server eventloop, we setup it so that the total number
  * of file descriptors we can handle are server.maxclients + RESERVED_FDS +
  * a few more to stay safe. Since RESERVED_FDS defaults to 32, we add 96
- * in order to make sure of not over provisioning more than 128 fds. */
+ * in order to make sure of not over provisioning more than 128 fds. 
+ * 当配置 server eventloop 时，我们将要处理的 fd 总数设置为 server.maxclients + RESERVED_FDS + 一点安全裕量。
+ * RESERVED_FDS 默认是 32，加 96 为了确保不超过 128
+ * */
 #define CONFIG_FDSET_INCR (CONFIG_MIN_RESERVED_FDS+96)
 
 /* Hash table parameters */
@@ -259,7 +262,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #define CLIENT_MASTER_FORCE_REPLY (1<<13)  /* Queue replies even if is master */
 #define CLIENT_FORCE_AOF (1<<14)   /* Force AOF propagation of current cmd. */
 #define CLIENT_FORCE_REPL (1<<15)  /* Force replication of current cmd. */
-#define CLIENT_PRE_PSYNC (1<<16)   /* Instance don't understand PSYNC. */
+#define CLIENT_PRE_PSYNC (1<<16)   /* Instance don't understand PSYNC. 发来 sync 的 client */
 #define CLIENT_READONLY (1<<17)    /* Cluster client is in read-only state. */
 #define CLIENT_PUBSUB (1<<18)      /* Client is in Pub/Sub mode. */
 #define CLIENT_PREVENT_AOF_PROP (1<<19)  /* Don't propagate to AOF. */
@@ -294,10 +297,13 @@ typedef long long mstime_t; /* millisecond time type. */
                                     three: normal, slave, pubsub. */
 
 /* Slave replication state. Used in server.repl_state for slaves to remember
- * what to do next. */
+ * what to do next. 
+ * 复制状态机
+ */
 #define REPL_STATE_NONE 0 /* No active replication */
 #define REPL_STATE_CONNECT 1 /* Must connect to master */
 #define REPL_STATE_CONNECTING 2 /* Connecting to master */
+
 /* --- Handshake states, must be ordered --- */
 #define REPL_STATE_RECEIVE_PONG 3 /* Wait for PING reply */
 #define REPL_STATE_SEND_AUTH 4 /* Send AUTH to master */
@@ -312,16 +318,23 @@ typedef long long mstime_t; /* millisecond time type. */
 #define REPL_STATE_RECEIVE_PSYNC 13 /* Wait for PSYNC reply */
 /* --- End of handshake states --- */
 #define REPL_STATE_TRANSFER 14 /* Receiving .rdb from master */
-#define REPL_STATE_CONNECTED 15 /* Connected to master */
+#define REPL_STATE_CONNECTED 15 /* Connected to master 完成全量同步 */
 
 /* State of slaves from the POV of the master. Used in client->replstate.
- * In SEND_BULK and ONLINE state the slave receives new updates
- * in its output queue. In the WAIT_BGSAVE states instead the server is waiting
- * to start the next background saving in order to send updates to it. */
-#define SLAVE_STATE_WAIT_BGSAVE_START 6 /* We need to produce a new RDB file. */
-#define SLAVE_STATE_WAIT_BGSAVE_END 7 /* Waiting RDB file creation to finish. */
-#define SLAVE_STATE_SEND_BULK 8 /* Sending RDB file to slave. */
+ * 从 master 角度看到的 slave 状态，在 client->replstate 中使用。
+
+ * In SEND_BULK and ONLINE state the slave receives new updates in its output queue. 
+ * SEND_BULK/ONLINE 状态，slave 在它的输出队列中接收新的 updates。
+ * 
+ * In the WAIT_BGSAVE states instead the server is waiting
+ * to start the next background saving in order to send updates to it. 
+ * WAIT_BGSAVE 状态，server 正在等到开始下一次 bgsave。
+ * */
+#define SLAVE_STATE_WAIT_BGSAVE_START 6 /* We need to produce a new RDB file. 我们需要生成一个 rdb 文件 */
+#define SLAVE_STATE_WAIT_BGSAVE_END 7 /* Waiting RDB file creation to finish. 等待 rdb 文件创建结束 */
+#define SLAVE_STATE_SEND_BULK 8 /* Sending RDB file to slave. 发送 rdb 文件给 slave */
 #define SLAVE_STATE_ONLINE 9 /* RDB file transmitted, sending just updates. */
+                             /* 需要配合 repl_put_online_on_ack 变量使用 */
 
 /* Slave capabilities. */
 #define SLAVE_CAPA_NONE 0
@@ -352,6 +365,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #define SUPERVISED_UPSTART 3
 
 /* Anti-warning macro... */
+// 未使用的变量，防止编译时报警告
 #define UNUSED(V) ((void) V)
 
 #define ZSKIPLIST_MAXLEVEL 32 /* Should be enough for 2^32 elements */
@@ -442,7 +456,15 @@ typedef long long mstime_t; /* millisecond time type. */
 
 /* Using the following macro you can run code inside serverCron() with the
  * specified period, specified in milliseconds.
- * The actual resolution depends on server.hz. */
+ * The actual resolution depends on server.hz.
+ *
+ * 该函数在 serverCron 中执行，用于控制不同的后台任务的周期，主要与 server.hz 这个参数有关，值为 1 ~ 500，
+ * 配置文件中默认为 100，也就是说 serverCron 默认为 1000 / 100 = 10ms 执行一次
+ *
+ * period = _ms_ <= 1000/server.hz
+ * 如果 _ms_ <= period，那么立即执行
+ * 否则，以 _ms_ 为周期执行（单位 ms），累积 (_ms_) / (1000/server.hz) 次 serverCron，由于 serverCron 执行周期为 1000/server.hz， 因此这里是累积 _ms_ 时间
+ * */
 #define run_with_period(_ms_) if ((_ms_ <= 1000/server.hz) || !(server.cronloops%((_ms_)/(1000/server.hz))))
 
 /* We can print the stacktrace, so our assert is defined this way: */
@@ -460,9 +482,10 @@ typedef long long mstime_t; /* millisecond time type. */
 #define LRU_BITS 24
 #define LRU_CLOCK_MAX ((1<<LRU_BITS)-1) /* Max value of obj->lru */
 #define LRU_CLOCK_RESOLUTION 1000 /* LRU clock resolution in ms */
+// 一个 redis 对象 (使用位域定义结构体成员变量，节省空间)
 typedef struct redisObject {
-    unsigned type:4;
-    unsigned encoding:4;
+    unsigned type:4; // 4 bit，4 bit 可以表示所有的 redis type，不需要 unsigned int 那么大
+    unsigned encoding:4; // 4 bit
     unsigned lru:LRU_BITS; /* lru time (relative to server.lruclock) */
     int refcount;
     void *ptr;
@@ -472,6 +495,7 @@ typedef struct redisObject {
  * If the current resolution is lower than the frequency we refresh the
  * LRU clock (as it should be in production servers) we return the
  * precomputed value, otherwise we need to resort to a system call. */
+// 如果 cron 执行的频率高于LRU算法的精度，返回之前计算好的 lruclock， 否则我们需要一次系统调用
 #define LRU_CLOCK() ((1000/server.hz <= LRU_CLOCK_RESOLUTION) ? server.lruclock : getLRUClock())
 
 /* Macro used to initialize a Redis object allocated on the stack.
@@ -568,16 +592,18 @@ typedef struct client {
     redisDb *db;            /* Pointer to currently SELECTed DB. */
     int dictid;             /* ID of the currently SELECTed DB. */
     robj *name;             /* As set by CLIENT SETNAME. */
+
+    // 客户端输入缓存
     sds querybuf;           /* Buffer we use to accumulate client queries. */
     size_t querybuf_peak;   /* Recent (100ms or more) peak of querybuf size. */
     int argc;               /* Num of arguments of current command. */
     robj **argv;            /* Arguments of current command. */
     struct redisCommand *cmd, *lastcmd;  /* Last command executed. */
     int reqtype;            /* Request protocol type: PROTO_REQ_* */
-    int multibulklen;       /* Number of multi bulk arguments left to read. */
+    int multibulklen;       /* Number of multi bulk arguments left to read. 剩余未读的参数个数*/
     long bulklen;           /* Length of bulk argument in multi bulk request. */
     list *reply;            /* List of reply objects to send to the client. */
-    unsigned long long reply_bytes; /* Tot bytes of objects in reply list. */
+    unsigned long long reply_bytes; /* Tot bytes of objects in reply list. reply list 中 object 里 ptr 指针指向的数据占用大小 */
     size_t sentlen;         /* Amount of bytes already sent in the current
                                buffer or object being sent. */
     time_t ctime;           /* Client creation time. */
@@ -587,16 +613,18 @@ typedef struct client {
     int authenticated;      /* When requirepass is non-NULL. */
     int replstate;          /* Replication state if this is a slave. */
     int repl_put_online_on_ack; /* Install slave write handler on ACK. */
-    int repldbfd;           /* Replication DB file descriptor. */
-    off_t repldboff;        /* Replication DB file offset. */
-    off_t repldbsize;       /* Replication DB file size. */
-    sds replpreamble;       /* Replication DB preamble. */
+
+    int repldbfd;           /* Replication DB file descriptor. 打开的 RDB 文件描述符 */
+    off_t repldboff;        /* Replication DB file offset. 已经向 slave 发送过的 RDB 数据的字节数 */
+    off_t repldbsize;       /* Replication DB file size. RDB文件的大小 */
+    sds replpreamble;       /* Replication DB preamble. 需要发送给 slave 的 RDB 数据的长度 */
     long long reploff;      /* Replication offset if this is our master. */
+
     long long repl_ack_off; /* Replication ack offset, if this is a slave. */
-    long long repl_ack_time;/* Replication ack time, if this is a slave. */
+    long long repl_ack_time;/* Replication ack time, if this is a slave. 
+                               收到 slave 的 reconf ack 命令时更新 */
     long long psync_initial_offset; /* FULLRESYNC reply offset other slaves
-                                       copying this slave output buffer
-                                       should use. */
+                                       copying this slave output buffer should use. */
     char replrunid[CONFIG_RUN_ID_SIZE+1]; /* Master run id if is a master. */
     int slave_listening_port; /* As configured with: REPLCONF listening-port */
     char slave_ip[NET_IP_STR_LEN]; /* Optionally given by REPLCONF ip-address */
@@ -612,12 +640,15 @@ typedef struct client {
 
     /* Response buffer */
     int bufpos;
-    char buf[PROTO_REPLY_CHUNK_BYTES];
+    char buf[PROTO_REPLY_CHUNK_BYTES]; // 16k 数据，静态 buf
 } client;
 
+/*
+ * 如 save 900 1 表示在 900 s 内至少对数据库进行了 1 次修改
+ */
 struct saveparam {
-    time_t seconds;
-    int changes;
+    time_t seconds;  // 秒数
+    int changes;  // 变化数
 };
 
 struct sharedObjectsStruct {
@@ -637,20 +668,23 @@ struct sharedObjectsStruct {
 
 /* ZSETs use a specialized version of Skiplists */
 typedef struct zskiplistNode {
-    robj *obj;
-    double score;
-    struct zskiplistNode *backward;
-    struct zskiplistLevel {
-        struct zskiplistNode *forward;
-        unsigned int span;
-    } level[];
-} zskiplistNode;
+    robj *obj;  // 本节点元素
+    double score; // 用于存储排序的分值
+    struct zskiplistNode *backward; // 后退指针，只能指向当前节点最底层的前一个节点
 
+    // 柔性数组，每个节点的数组长度不一样，在生成跳表节点时随机生成
+    struct zskiplistLevel {
+        struct zskiplistNode *forward; // 指向本层下一个节点
+        unsigned int span;  // 跨度
+    } level[];
+} zskiplistNode;// 跳表节点
+
+// header、tail 使得程序在 O(1) 时间内获得跳表的头部和尾部
 typedef struct zskiplist {
-    struct zskiplistNode *header, *tail;
-    unsigned long length;
-    int level;
-} zskiplist;
+    struct zskiplistNode *header, *tail; // 跳表的表头节点和表尾节点
+    unsigned long length; // 跳表长度 (除头节点之外，底层链表长度)
+    int level; // 跳表高度
+} zskiplist; // 跳表结构
 
 typedef struct zset {
     dict *dict;
@@ -794,6 +828,7 @@ struct redisServer {
     int supervised_mode;            /* See SUPERVISED_* */
     int daemonize;                  /* True if running as a daemon */
     clientBufferLimitsConfig client_obuf_limits[CLIENT_TYPE_OBUF_COUNT];
+
     /* AOF persistence */
     int aof_state;                  /* AOF_(ON|OFF|WAIT_REWRITE) */
     int aof_fsync;                  /* Kind of fsync() policy */
@@ -806,7 +841,7 @@ struct redisServer {
     int aof_rewrite_scheduled;      /* Rewrite once BGSAVE terminates. */
     pid_t aof_child_pid;            /* PID if rewriting process */
     list *aof_rewrite_buf_blocks;   /* Hold changes during an AOF rewrite. */
-    sds aof_buf;      /* AOF buffer, written before entering the event loop */
+    sds aof_buf;      /* AOF 缓存区 AOF buffer, written before entering the event loop */
     int aof_fd;       /* File descriptor of currently selected AOF file */
     int aof_selected_db; /* Currently selected DB in AOF */
     time_t aof_flush_postponed_start; /* UNIX time of postponed AOF flush */
@@ -819,6 +854,7 @@ struct redisServer {
     int aof_last_write_status;      /* C_OK or C_ERR */
     int aof_last_write_errno;       /* Valid if aof_last_write_status is ERR */
     int aof_load_truncated;         /* Don't stop on unexpected AOF EOF. */
+
     /* AOF pipes used to communicate between parent and child during rewrite. */
     int aof_pipe_write_data_to_child;
     int aof_pipe_read_data_from_parent;
@@ -828,16 +864,21 @@ struct redisServer {
     int aof_pipe_read_ack_from_parent;
     int aof_stop_sending_diff;     /* If true stop sending accumulated diffs
                                       to child process. */
-    sds aof_child_diff;             /* AOF diff accumulator child side. */
+    sds aof_child_diff;             /* AOF diff accumulator child side. aof 重写期间从父进程得到的数据 */
+
+
     /* RDB persistence */
+    // dirty 计数器记录距离上一次成功执行 save 或者 bgsave 之后，server 对数据库状态进行了多少次修改
     long long dirty;                /* Changes to DB from the last save */
     long long dirty_before_bgsave;  /* Used to restore dirty on failed BGSAVE */
     pid_t rdb_child_pid;            /* PID of RDB saving child */
-    struct saveparam *saveparams;   /* Save points array for RDB */
+    struct saveparam *saveparams;   /* Save points array for RDB */ // rdb 的 save 条件
     int saveparamslen;              /* Number of saving points */
     char *rdb_filename;             /* Name of RDB file */
     int rdb_compression;            /* Use compression in RDB? */
     int rdb_checksum;               /* Use RDB checksum? */
+
+    // 记录服务器上次成功执行 save 或者 bgsave 的时间戳
     time_t lastsave;                /* Unix time of last successful save */
     time_t lastbgsave_try;          /* Unix time of last attempted bgsave */
     time_t rdb_save_time_last;      /* Time used by last RDB save run. */
@@ -855,16 +896,31 @@ struct redisServer {
     int syslog_enabled;             /* Is syslog enabled? */
     char *syslog_ident;             /* Syslog ident */
     int syslog_facility;            /* Syslog facility */
+    
     /* Replication (master) */
     int slaveseldb;                 /* Last SELECTed DB in replication output */
     long long master_repl_offset;   /* Global replication offset */
     int repl_ping_slave_period;     /* Master pings the slave every N seconds */
+
+    // 所有 slave 共享一份 repl_backlog, 只针对部分复制
     char *repl_backlog;             /* Replication backlog for partial syncs */
+    // backlog 环形 buffer 的长度
     long long repl_backlog_size;    /* Backlog circular buffer size */
+
+    // backlog 中有效数据大小。开始 < repl_backlog_size，但缓冲区满后一直等于repl_backlog_size
     long long repl_backlog_histlen; /* Backlog actual data length */
+
+    // 最新数据的截止位置，更新的数据总是从这里开始写入到 repl_backlog 中
+    // 从这里写
+    // 复制缓冲区中存储的命令请求最后一个字节索引位置
     long long repl_backlog_idx;     /* Backlog circular buffer current offset */
+
+    // repl_backlog 中 idx 变量所指的位置的 offset
+    // 在积压队列中，最早保存的命令的首字节，在全局范围内（而非积压队列内）的偏移量
+    // 从这里读
     long long repl_backlog_off;     /* Replication offset of first byte in the
                                        backlog buffer. */
+    // 环形缓冲复制队列生存时长
     time_t repl_backlog_time_limit; /* Time without slaves after the backlog
                                        gets released. */
     time_t repl_no_slaves_since;    /* We have no slaves since that time.
@@ -879,17 +935,21 @@ struct redisServer {
     char *masterhost;               /* Hostname of master */
     int masterport;                 /* Port of master */
     int repl_timeout;               /* Timeout after N seconds of master idle */
+
     client *master;     /* Client that is master for this slave */
     client *cached_master; /* Cached master to be reused for PSYNC. */
     int repl_syncio_timeout; /* Timeout for synchronous I/O calls */
-    int repl_state;          /* Replication status if the instance is a slave */
+
+    int repl_state;          /* Replication status if the instance is a slave */  // 记录slave节点的状态
     off_t repl_transfer_size; /* Size of RDB to read from master during sync. */
     off_t repl_transfer_read; /* Amount of RDB read from master during sync. */
     off_t repl_transfer_last_fsync_off; /* Offset when we fsync-ed last time. */
-    int repl_transfer_s;     /* Slave -> Master SYNC socket */
-    int repl_transfer_fd;    /* Slave -> Master SYNC temp file descriptor */
-    char *repl_transfer_tmpfile; /* Slave-> master SYNC temp file name */
+
+int repl_transfer_s;     /* Slave -> Master SYNC socket */ // 主从 tcp 通信 socket
+    int repl_transfer_fd;    /* Slave -> Master SYNC temp file descriptor */ // 用于 slave将收到的RDB数据写到本地临时文件
+    char *repl_transfer_tmpfile; /* Slave-> master SYNC temp file name */ // 记录RDB数据的临时文件名
     time_t repl_transfer_lastio; /* Unix time of the latest read, for timeout */
+
     int repl_serve_stale_data; /* Serve stale data when link is down? */
     int repl_slave_ro;          /* Slave is read only? */
     time_t repl_down_since; /* Unix time at which link with master went down */
@@ -934,8 +994,11 @@ struct redisServer {
     /* time cache */
     time_t unixtime;        /* Unix time sampled every cron cycle. */
     long long mstime;       /* Like 'unixtime' but with milliseconds resolution. */
+
     /* Pubsub */
+    // 普通模式收集某个 channel 都有哪些 client 订阅
     dict *pubsub_channels;  /* Map channels to list of subscribed clients */
+    // 模糊模式收集 client
     list *pubsub_patterns;  /* A list of pubsub_patterns */
     int notify_keyspace_events; /* Events to propagate via Pub/Sub. This is an
                                    xor of NOTIFY_... flags. */
@@ -952,7 +1015,7 @@ struct redisServer {
     lua_State *lua; /* The Lua interpreter. We use just one for all clients */
     client *lua_client;   /* The "fake client" to query Redis from Lua */
     client *lua_caller;   /* The client running EVAL right now, or NULL */
-    dict *lua_scripts;         /* A dictionary of SHA1 -> Lua scripts */
+    dict *lua_scripts;         /* A dictionary of SHA1 -> Lua scripts */ // 保存 lua 脚本
     mstime_t lua_time_limit;  /* Script timeout in milliseconds */
     mstime_t lua_time_start;  /* Start time of script, milliseconds time */
     int lua_write_dirty;  /* True if a write command was called during the

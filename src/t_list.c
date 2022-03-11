@@ -194,26 +194,28 @@ void listTypeConvert(robj *subject, int enc) {
  * List Commands
  *----------------------------------------------------------------------------*/
 
+// LPUSH key element [element ...]
 void pushGenericCommand(client *c, int where) {
     int j, waiting = 0, pushed = 0;
-    robj *lobj = lookupKeyWrite(c->db,c->argv[1]);
+    robj *lobj = lookupKeyWrite(c->db,c->argv[1]); // key
 
-    if (lobj && lobj->type != OBJ_LIST) {
+    if (lobj && lobj->type != OBJ_LIST) { // 非 list 类型不支持 push 操作
         addReply(c,shared.wrongtypeerr);
         return;
     }
 
-    for (j = 2; j < c->argc; j++) {
-        c->argv[j] = tryObjectEncoding(c->argv[j]);
+    for (j = 2; j < c->argc; j++) { // element 入 list
+        c->argv[j] = tryObjectEncoding(c->argv[j]); // value 编码
         if (!lobj) {
-            lobj = createQuicklistObject();
+            lobj = createQuicklistObject(); // key 不存在，那就新建一个 quicklist
             quicklistSetOptions(lobj->ptr, server.list_max_ziplist_size,
                                 server.list_compress_depth);
-            dbAdd(c->db,c->argv[1],lobj);
+            dbAdd(c->db,c->argv[1],lobj); // 触发 signalListAsReady
         }
         listTypePush(lobj,c->argv[j],where);
         pushed++;
     }
+    // 返回 list 元素个数
     addReplyLongLong(c, waiting + (lobj ? listTypeLength(lobj) : 0));
     if (pushed) {
         char *event = (where == LIST_HEAD) ? "lpush" : "rpush";
@@ -619,7 +621,7 @@ void blockForKeys(client *c, robj **keys, int numkeys, mstime_t timeout, robj *t
     int j;
 
     c->bpop.timeout = timeout;
-    c->bpop.target = target;
+    c->bpop.target = target; // BRPOPLPUSH 命令中的 destination
 
     if (target != NULL) incrRefCount(target);
 
@@ -641,13 +643,15 @@ void blockForKeys(client *c, robj **keys, int numkeys, mstime_t timeout, robj *t
         } else {
             l = dictGetVal(de);
         }
-        listAddNodeTail(l,c);
+        listAddNodeTail(l,c); // 记录阻塞在 keys[j] 的 client 都有哪些
     }
     blockClient(c,BLOCKED_LIST);
 }
 
 /* Unblock a client that's waiting in a blocking operation such as BLPOP.
  * You should never call this function directly, but unblockClient() instead. */
+// unblock 一个因为 BLPOP 等阻塞操作而阻塞主的 client
+// 除了在 unblockClient 函数中调用外，不应该直接调用该函数
 void unblockClientWaitingData(client *c) {
     dictEntry *de;
     dictIterator *di;
@@ -656,20 +660,25 @@ void unblockClientWaitingData(client *c) {
     serverAssertWithInfo(c,NULL,dictSize(c->bpop.keys) != 0);
     di = dictGetIterator(c->bpop.keys);
     /* The client may wait for multiple keys, so unblock it for every key. */
+    // 该 client 可能阻塞与多个 key 上，逐个 unblock
     while((de = dictNext(di)) != NULL) {
         robj *key = dictGetKey(de);
 
         /* Remove this client from the list of clients waiting for this key. */
         l = dictFetchValue(c->db->blocking_keys,key);
         serverAssertWithInfo(c,key,l != NULL);
+        // 从 key 的阻塞 client 链表中删除该 client
         listDelNode(l,listSearchKey(l,c));
         /* If the list is empty we need to remove it to avoid wasting memory */
+        // 如果阻塞在 key 上的 client 被清空了，那么把 key 从 blocking_keys dict 中移除掉，避免内存浪费
         if (listLength(l) == 0)
             dictDelete(c->db->blocking_keys,key);
     }
     dictReleaseIterator(di);
 
     /* Cleanup the client structure */
+    // 清空 c->bpop.keys 字典
+    // 阻塞于多个 key 的 client，只要其中任意一个 key list 中有元素，就可以解阻塞
     dictEmpty(c->bpop.keys,NULL);
     if (c->bpop.target) {
         decrRefCount(c->bpop.target);
@@ -683,14 +692,20 @@ void unblockClientWaitingData(client *c) {
  * the same key again and again in the list in case of multiple pushes
  * made by a script or in the context of MULTI/EXEC.
  *
+ * 如果有 client 阻塞在特定的 key 上，等待 list 做 push，
+ * 这分函数将把 key 放到 server.ready_keys 链表里。
+ * 注意：db->ready_keys 是一个哈希表，避免了由于脚本或者在 MULTI/EXEC 上下文中我们重复放相同的 key
+ *
  * The list will be finally processed by handleClientsBlockedOnLists() */
 void signalListAsReady(redisDb *db, robj *key) {
     readyList *rl;
 
     /* No clients blocking for this key? No need to queue it. */
+    // 是否有 client 阻塞在这个 key 上
     if (dictFind(db->blocking_keys,key) == NULL) return;
 
     /* Key was already signaled? No need to queue it again. */
+    // 这个 key 已经发过信号了，就没必要再通知
     if (dictFind(db->ready_keys,key) != NULL) return;
 
     /* Ok, we need to queue this key into server.ready_keys. */
@@ -698,11 +713,13 @@ void signalListAsReady(redisDb *db, robj *key) {
     rl->key = key;
     rl->db = db;
     incrRefCount(key);
-    listAddNodeTail(server.ready_keys,rl);
+    listAddNodeTail(server.ready_keys,rl); // 加到 server.ready_keys
 
     /* We also add the key in the db->ready_keys dictionary in order
      * to avoid adding it multiple times into a list with a simple O(1)
      * check. */
+     // 在 db->ready_keys 这个 map 中加入 key，这是因为，
+     // 在插入 server.ready_keys 之前需要去重，查询 map 可以将时间复杂度降为 O(1)
     incrRefCount(key);
     serverAssert(dictAdd(db->ready_keys,key,NULL) == DICT_OK);
 }
@@ -740,11 +757,12 @@ int serveClientBlockedOnList(client *receiver, robj *key, robj *dstkey, redisDb 
             db->id,argv,2,PROPAGATE_AOF|PROPAGATE_REPL);
 
         /* BRPOP/BLPOP */
+        // 回复客户端
         addReplyMultiBulkLen(receiver,2);
         addReplyBulk(receiver,key);
         addReplyBulk(receiver,value);
     } else {
-        /* BRPOPLPUSH */
+        /* BRPOPLPUSH 命令逻辑 */
         robj *dstobj =
             lookupKeyWrite(receiver->db,dstkey);
         if (!(dstobj &&
@@ -757,6 +775,7 @@ int serveClientBlockedOnList(client *receiver, robj *key, robj *dstkey, redisDb 
                 db->id,argv,2,
                 PROPAGATE_AOF|
                 PROPAGATE_REPL);
+            // 回复 client
             rpoplpushHandlePush(receiver,dstkey,dstobj,
                 value);
             /* Propagate the LPUSH operation. */
@@ -768,6 +787,8 @@ int serveClientBlockedOnList(client *receiver, robj *key, robj *dstkey, redisDb 
                 PROPAGATE_AOF|
                 PROPAGATE_REPL);
         } else {
+            // dst key 有问题？
+            // TODO: 是否应该在 pop 命令时就检查两个 key 是否合规
             /* BRPOPLPUSH failed because of wrong
              * destination type. */
             return C_ERR;
@@ -779,7 +800,8 @@ int serveClientBlockedOnList(client *receiver, robj *key, robj *dstkey, redisDb 
 /* This function should be called by Redis every time a single command,
  * a MULTI/EXEC block, or a Lua script, terminated its execution after
  * being called by a client.
- *
+ * 该函数会在 redis 每次执行完单个命令，事务块或 lua 脚本之后被调用。
+ * 
  * All the keys with at least one client blocked that received at least
  * one new element via some PUSH operation are accumulated into
  * the server.ready_keys list. This function will run the list and will
@@ -790,56 +812,63 @@ void handleClientsBlockedOnLists(void) {
     while(listLength(server.ready_keys) != 0) {
         list *l;
 
-        /* Point server.ready_keys to a fresh list and save the current one
-         * locally. This way as we run the old list we are free to call
+        /* Point server.ready_keys to a fresh list and save the current one locally. 
+         * This way as we run the old list we are free to call
          * signalListAsReady() that may push new elements in server.ready_keys
          * when handling clients blocked into BRPOPLPUSH. */
+        // 将 server.ready_keys 备份到一个本地变量后，置空，
+        // 当处理因为 BRPOPLPUSH 而 block 的 clinet 时，使用本地 list 处理可能会往 server.ready_keys 里放入新的元素
         l = server.ready_keys;
         server.ready_keys = listCreate();
 
+        // 一次处理完所有的 ready_keys
         while(listLength(l) != 0) {
             listNode *ln = listFirst(l);
             readyList *rl = ln->value;
 
             /* First of all remove this key from db->ready_keys so that
              * we can safely call signalListAsReady() against this key. */
+            // 首先从 db->ready_keys 中删掉 key,
+            // 这样我们就可以安全的调用 signalListAsReady() 函数了
             dictDelete(rl->db->ready_keys,rl->key);
 
             /* If the key exists and it's a list, serve blocked clients
              * with data. */
             robj *o = lookupKeyWrite(rl->db,rl->key);
-            if (o != NULL && o->type == OBJ_LIST) {
+            if (o != NULL && o->type == OBJ_LIST) { // 仅支持处理 list
                 dictEntry *de;
 
                 /* We serve clients in the same order they blocked for
                  * this key, from the first blocked to the last. */
-                de = dictFind(rl->db->blocking_keys,rl->key);
+                de = dictFind(rl->db->blocking_keys,rl->key); // 找到那些因为这个 key 而阻塞的 client list
                 if (de) {
                     list *clients = dictGetVal(de);
                     int numclients = listLength(clients);
 
-                    while(numclients--) {
+                    while(numclients--) { // 遍历 blocked client list
                         listNode *clientnode = listFirst(clients);
-                        client *receiver = clientnode->value;
+                        client *receiver = clientnode->value; // 阻塞的 client
                         robj *dstkey = receiver->bpop.target;
                         int where = (receiver->lastcmd &&
                                      receiver->lastcmd->proc == blpopCommand) ?
                                     LIST_HEAD : LIST_TAIL;
-                        robj *value = listTypePop(o,where);
+                        robj *value = listTypePop(o,where); // 做 pop 操作
 
                         if (value) {
                             /* Protect receiver->bpop.target, that will be
                              * freed by the next unblockClient()
                              * call. */
                             if (dstkey) incrRefCount(dstkey);
-                            unblockClient(receiver);
+                            unblockClient(receiver); 
 
+                            // 回客户端数据
                             if (serveClientBlockedOnList(receiver,
                                 rl->key,dstkey,rl->db,value,
                                 where) == C_ERR)
                             {
                                 /* If we failed serving the client we need
                                  * to also undo the POP operation. */
+                                // 如果发生错误，那就再回滚
                                     listTypePush(o,value,where);
                             }
 
@@ -851,7 +880,7 @@ void handleClientsBlockedOnLists(void) {
                     }
                 }
 
-                if (listTypeLength(o) == 0) {
+                if (listTypeLength(o) == 0) { // list 被 pop 完了，就删掉这个 key 吧
                     dbDelete(rl->db,rl->key);
                 }
                 /* We don't call signalModifiedKey() as it was already called
@@ -861,52 +890,66 @@ void handleClientsBlockedOnLists(void) {
             /* Free this item. */
             decrRefCount(rl->key);
             zfree(rl);
-            listDelNode(l,ln);
+            listDelNode(l,ln); // 从 l 中删除这个 key，进入下一轮处理
         }
         listRelease(l); /* We have the new list on place at this point. */
     }
 }
 
 /* Blocking RPOP/LPOP */
+// BRPOP key [key ...] timeout
+// 按照顺序从第一个非空的 key 中拿到一个 value，然后返回
 void blockingPopGenericCommand(client *c, int where) {
     robj *o;
     mstime_t timeout;
     int j;
 
+    // 从参数中获得 timeout 参数
     if (getTimeoutFromObjectOrReply(c,c->argv[c->argc-1],&timeout,UNIT_SECONDS)
         != C_OK) return;
 
+    // 遍历 key 参数
     for (j = 1; j < c->argc-1; j++) {
         o = lookupKeyWrite(c->db,c->argv[j]);
         if (o != NULL) {
-            if (o->type != OBJ_LIST) {
+            if (o->type != OBJ_LIST) { // 仅支持 list 类型的 key 做 pop
                 addReply(c,shared.wrongtypeerr);
                 return;
             } else {
+                // list 里有元素才会就进行接下来的操作
                 if (listTypeLength(o) != 0) {
+
                     /* Non empty list, this is like a non normal [LR]POP. */
+                    // 非空 list，命令执行跟正常的 lpop/rpop 相同
                     char *event = (where == LIST_HEAD) ? "lpop" : "rpop";
-                    robj *value = listTypePop(o,where);
+                    robj *value = listTypePop(o,where); // 根据 where 拿数据
                     serverAssert(value != NULL);
 
-                    addReplyMultiBulkLen(c,2);
-                    addReplyBulk(c,c->argv[j]);
-                    addReplyBulk(c,value);
-                    decrRefCount(value);
+                    addReplyMultiBulkLen(c,2); // reply 拼接 *length
+                    addReplyBulk(c,c->argv[j]); // reply 拼接 key
+                    addReplyBulk(c,value);// reply 拼接 value
+                    decrRefCount(value); // value 引用减 1
+
+                    // 发送 event 通知
                     notifyKeyspaceEvent(NOTIFY_LIST,event,
                                         c->argv[j],c->db->id);
-                    if (listTypeLength(o) == 0) {
+                    if (listTypeLength(o) == 0) { // 如果 pop 以后，list 为空了，就删掉这个 key
                         dbDelete(c->db,c->argv[j]);
+
+                       // 发送"del"的事件通知
                         notifyKeyspaceEvent(NOTIFY_GENERIC,"del",
                                             c->argv[j],c->db->id);
                     }
                     signalModifiedKey(c->db,c->argv[j]);
-                    server.dirty++;
+                    server.dirty++; // 标记 aof 和 replicate
 
+                    // 重写 B[LR]POP 命令
                     /* Replicate it as an [LR]POP instead of B[LR]POP. */
                     rewriteClientCommandVector(c,2,
                         (where == LIST_HEAD) ? shared.lpop : shared.rpop,
                         c->argv[j]);
+
+                    // 该函数在第一个非空 key 处返回
                     return;
                 }
             }
@@ -921,9 +964,13 @@ void blockingPopGenericCommand(client *c, int where) {
     }
 
     /* If the list is empty or the key does not exists we must block */
+    // 如果 key 是空 list，或者 key 不存在，必须做 block 处理
+
+    // 只有这一组的 key 全部都不存在，才会进入阻塞
     blockForKeys(c, c->argv + 1, c->argc - 2, timeout, NULL);
 }
 
+// blpop / brpop 区别在于 where: LIST_HEAD / LIST_TAIL
 void blpopCommand(client *c) {
     blockingPopGenericCommand(c,LIST_HEAD);
 }
@@ -938,7 +985,7 @@ void brpoplpushCommand(client *c) {
     if (getTimeoutFromObjectOrReply(c,c->argv[3],&timeout,UNIT_SECONDS)
         != C_OK) return;
 
-    robj *key = lookupKeyWrite(c->db, c->argv[1]);
+    robj *key = lookupKeyWrite(c->db, c->argv[1]); // src
 
     if (key == NULL) {
         if (c->flags & CLIENT_MULTI) {
@@ -947,10 +994,11 @@ void brpoplpushCommand(client *c) {
             addReply(c, shared.nullbulk);
         } else {
             /* The list is empty and the client blocks. */
+            // 阻塞在 source key 上
             blockForKeys(c, c->argv + 1, 1, timeout, c->argv[2]);
         }
     } else {
-        if (key->type != OBJ_LIST) {
+        if (key->type != OBJ_LIST) { // 只支持 list 类型
             addReply(c, shared.wrongtypeerr);
         } else {
             /* The list exists and has elements, so

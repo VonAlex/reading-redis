@@ -57,7 +57,13 @@ ssize_t syncWrite(int fd, char *ptr, ssize_t size, long long timeout) {
         long long elapsed;
 
         /* Optimistically try to write before checking if the file descriptor
-         * is actually writable. At worst we get EAGAIN. */
+         * is actually writable. At worst we get EAGAIN. 
+         *
+         * 乐观 write，在检查 fd 实际可写之前就 write，有三种结果：
+         * 1. 返回 EAGAIN，说明 fd 现在不可写，进入后面 wait 等待可写的阻塞。
+         * 2. 非 EAGAIN 的 errno，说明 socket 有问题，退出这次 write
+         * 3. 直接 write 成功，这是最好的结果。
+         */
         nwritten = write(fd,ptr,size);
         if (nwritten == -1) {
             if (errno != EAGAIN) return -1;
@@ -68,9 +74,9 @@ ssize_t syncWrite(int fd, char *ptr, ssize_t size, long long timeout) {
         if (size == 0) return ret;
 
         /* Wait */
-        aeWait(fd,AE_WRITABLE,wait);
+        aeWait(fd,AE_WRITABLE,wait); // 至少等待 10 ms
         elapsed = mstime() - start;
-        if (elapsed >= timeout) {
+        if (elapsed >= timeout) { // 写 size 字节的数据耗时超过 timeout ms
             errno = ETIMEDOUT;
             return -1;
         }

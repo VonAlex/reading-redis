@@ -55,6 +55,7 @@
 static int zslLexValueGteMin(robj *value, zlexrangespec *spec);
 static int zslLexValueLteMax(robj *value, zlexrangespec *spec);
 
+// 创建一个 zskiplist 节点
 zskiplistNode *zslCreateNode(int level, double score, robj *obj) {
     zskiplistNode *zn = zmalloc(sizeof(*zn)+level*sizeof(struct zskiplistLevel));
     zn->score = score;
@@ -62,15 +63,16 @@ zskiplistNode *zslCreateNode(int level, double score, robj *obj) {
     return zn;
 }
 
+// 创建返回一个跳跃表
 zskiplist *zslCreate(void) {
     int j;
     zskiplist *zsl;
 
     zsl = zmalloc(sizeof(*zsl));
-    zsl->level = 1;
+    zsl->level = 1; // 跳表层高初始化为 1
     zsl->length = 0;
-    zsl->header = zslCreateNode(ZSKIPLIST_MAXLEVEL,0,NULL);
-    for (j = 0; j < ZSKIPLIST_MAXLEVEL; j++) {
+    zsl->header = zslCreateNode(ZSKIPLIST_MAXLEVEL,0,NULL); // header 节点有最大层数
+    for (j = 0; j < ZSKIPLIST_MAXLEVEL; j++) { // 初始化每一层结构
         zsl->header->level[j].forward = NULL;
         zsl->header->level[j].span = 0;
     }
@@ -100,27 +102,47 @@ void zslFree(zskiplist *zsl) {
  * The return value of this function is between 1 and ZSKIPLIST_MAXLEVEL
  * (both inclusive), with a powerlaw-alike distribution where higher
  * levels are less likely to be returned. */
+// 根据类似幂次定律生成一个 1-32 的 level 数值，越高的 level 越不可能出现
+/*
+ * random() & 0xFFFF 得到的值，均匀分布在区间[0,0xFFFF]上，那么这个数小于(ZSKIPLIST_P * 0xFFFF)的概率是多少呢？
+ * 自然就是 ZSKIPLIST_P，也就是 0.25，假设为 p
+ *
+ * level 为 1 的概率是 1 - p 
+ * level 为 2 的概率为 (1 - p) * p ，
+ * level 为 3 的概率为 (1 - p) * p * p
+ * level 为 n 的概率为 (1 - p) * p^(n-1)
+ * 
+ * 所以，节点的期望 level 是 E = 1*(1-p) + 2*(1-p)*p + ... + n*(1-p)*p^(n-1) = 1/(1-p)
+ * 当 p = 0.25 时，跳表节点的期望层高为 1/(1-0.25) = 1.33 
+ */
 int zslRandomLevel(void) {
     int level = 1;
     while ((random()&0xFFFF) < (ZSKIPLIST_P * 0xFFFF))
         level += 1;
-    return (level<ZSKIPLIST_MAXLEVEL) ? level : ZSKIPLIST_MAXLEVEL;
+    return (level<ZSKIPLIST_MAXLEVEL) ? level : ZSKIPLIST_MAXLEVEL; // 最多 32 层
 }
 
+// 创建一个节点，分数为 score，对象为obj，插入到zsl表头管理的跳跃表中，并返回新节点的地址
 zskiplistNode *zslInsert(zskiplist *zsl, double score, robj *obj) {
-    zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
-    unsigned int rank[ZSKIPLIST_MAXLEVEL];
+    zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x; // update 记录新节点插入位置的各层前置节点
+    unsigned int rank[ZSKIPLIST_MAXLEVEL]; // rank 记录各层从 header 节点到 update[i] 节点所经历的步长
     int i, level;
 
     serverAssert(!isnan(score));
     x = zsl->header;
+
+    // 从 header 最高层开始查找
     for (i = zsl->level-1; i >= 0; i--) {
         /* store rank that is crossed to reach the insert position */
+        // 如果是 i == zsl->level-1，为最高层，rank[i] 初始化为 0，从 0 开始累加
+        // 否则，rank[i] 初始化为 rank[i+1]，即，在上一层的基础上累加
         rank[i] = i == (zsl->level-1) ? 0 : rank[i+1];
-        while (x->level[i].forward &&
-            (x->level[i].forward->score < score ||
-                (x->level[i].forward->score == score &&
-                compareStringObjects(x->level[i].forward->obj,obj) < 0))) {
+
+        // 以下两种情况可以在第 i 层继续遍历：
+        // 1）forward 不为空，即第 i 层还没有遍历到尾部，并且 score 比要插入的节点要小
+        // 2）score 与要插入的节点相同，但是值要小（字典序）
+        while (x->level[i].forward && (x->level[i].forward->score < score ||
+                (x->level[i].forward->score == score && compareStringObjects(x->level[i].forward->obj,obj) < 0))) {
             rank[i] += x->level[i].span;
             x = x->level[i].forward;
         }
@@ -129,36 +151,40 @@ zskiplistNode *zslInsert(zskiplist *zsl, double score, robj *obj) {
     /* we assume the key is not already inside, since we allow duplicated
      * scores, and the re-insertion of score and redis object should never
      * happen since the caller of zslInsert() should test in the hash table
-     * if the element is already inside or not. */
-    level = zslRandomLevel();
-    if (level > zsl->level) {
+     * if the element is already inside or not. 
+     * 我们假设 key 不存在，即使我们允许存在相同的 score，也不能重新插入 redis object 和 score。
+     * 因为 zslInsert() 的调用者应该现在 hash 表里测试下 key 是否存在
+     */
+    level = zslRandomLevel(); 
+    if (level > zsl->level) { // 如果新的 level 超出了现在的跳表高度
         for (i = zsl->level; i < level; i++) {
-            rank[i] = 0;
+            rank[i] = 0; // 没有 forward 节点，所以  rank[i] = 0
             update[i] = zsl->header;
-            update[i]->level[i].span = zsl->length;
+            update[i]->level[i].span = zsl->length; // 先初始化为 zsl->length，后面进行更新
         }
         zsl->level = level;
     }
-    x = zslCreateNode(level,score,obj);
+    x = zslCreateNode(level,score,obj); // 创建跳表节点
     for (i = 0; i < level; i++) {
-        x->level[i].forward = update[i]->level[i].forward;
+        x->level[i].forward = update[i]->level[i].forward; // 在 update[i] 与 update[i]->forward 之间插入 x
         update[i]->level[i].forward = x;
 
         /* update span covered by update[i] as x is inserted here */
+        // update[i] 到下一个节点的距离减去 update[0] 与 update[i] 的距离
         x->level[i].span = update[i]->level[i].span - (rank[0] - rank[i]);
         update[i]->level[i].span = (rank[0] - rank[i]) + 1;
     }
 
     /* increment span for untouched levels */
-    for (i = level; i < zsl->level; i++) {
+    for (i = level; i < zsl->level; i++) { // 因为在 update[i] 后面加了一个节点，所有 span 都要加 1
         update[i]->level[i].span++;
     }
 
     x->backward = (update[0] == zsl->header) ? NULL : update[0];
     if (x->level[0].forward)
-        x->level[0].forward->backward = x;
+        x->level[0].forward->backward = x; // 后置节点的 backward 指向 x
     else
-        zsl->tail = x;
+        zsl->tail = x; // 如果 x->level[0].forward == NULL 说明这是个 tail 
     zsl->length++;
     return x;
 }

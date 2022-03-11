@@ -31,8 +31,8 @@
 void bioInit(void);
 void bioCreateBackgroundJob(int type, void *arg1, void *arg2, void *arg3);
 unsigned long long bioPendingJobsOfType(int type);
-void bioWaitPendingJobsLE(int type, unsigned long long num);
-time_t bioOlderJobOfType(int type);
+void bioWaitPendingJobsLE(int type, unsigned long long num); // 本版本未实现
+time_t bioOlderJobOfType(int type); // 本版本未实现
 void bioKillThreads(void);
 
 /* Background job opcodes */

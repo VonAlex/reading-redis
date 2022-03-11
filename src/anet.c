@@ -470,19 +470,21 @@ static int _anetTcpServer(char *err, int port, char *bindaddr, int af, int backl
     memset(&hints,0,sizeof(hints));
     hints.ai_family = af;
     hints.ai_socktype = SOCK_STREAM;
+
+    // 通常服务器端在调用 getaddrinfo 之前，ai_flags 设置 AI_PASSIVE，用于bind
     hints.ai_flags = AI_PASSIVE;    /* No effect if bindaddr != NULL */
 
-    if ((rv = getaddrinfo(bindaddr,_port,&hints,&servinfo)) != 0) {
+    if ((rv = getaddrinfo(bindaddr,_port,&hints,&servinfo)) != 0) { // 根据 hints 得到 servinfo
         anetSetError(err, "%s", gai_strerror(rv));
         return ANET_ERR;
     }
     for (p = servinfo; p != NULL; p = p->ai_next) {
-        if ((s = socket(p->ai_family,p->ai_socktype,p->ai_protocol)) == -1)
+        if ((s = socket(p->ai_family,p->ai_socktype,p->ai_protocol)) == -1) // 创建 socket
             continue;
 
         if (af == AF_INET6 && anetV6Only(err,s) == ANET_ERR) goto error;
-        if (anetSetReuseAddr(err,s) == ANET_ERR) goto error;
-        if (anetListen(err,s,p->ai_addr,p->ai_addrlen,backlog) == ANET_ERR) goto error;
+        if (anetSetReuseAddr(err,s) == ANET_ERR) goto error; // 为 socket 设置 SO_REUSEADDR 选项，以便快速复用端口
+        if (anetListen(err,s,p->ai_addr,p->ai_addrlen,backlog) == ANET_ERR) goto error; // bind & listen
         goto end;
     }
     if (p == NULL) {

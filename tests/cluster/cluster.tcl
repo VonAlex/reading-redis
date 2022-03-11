@@ -5,6 +5,8 @@
 # more information.
 
 # Returns a parsed CLUSTER NODES output as a list of dictionaries.
+
+# <id> <ip:port> <flags> <master> <ping-sent> <pong-recv> <config-epoch> <link-state> <slot> ...
 proc get_cluster_nodes id {
     set lines [split [R $id cluster nodes] "\r\n"]
     set nodes {}
@@ -16,6 +18,7 @@ proc get_cluster_nodes id {
             id [lindex $args 0] \
             addr [lindex $args 1] \
             flags [split [lindex $args 2] ,] \
+            # masterid
             slaveof [lindex $args 3] \
             ping_sent [lindex $args 4] \
             pong_recv [lindex $args 5] \
@@ -76,11 +79,17 @@ proc assert_cluster_state {state} {
 
 # Search the first node starting from ID $first that is not
 # already configured as a slave.
+
+# 10 个 实例的话，first 传入 5， 那么 5 个实例就设置成前 5 个实例的 slave 了
 proc cluster_find_available_slave {first} {
     foreach_redis_id id {
+
+        # 跳过前 first 个 实例
         if {$id < $first} continue
         if {[instance_is_killed redis $id]} continue
         set me [get_myself $id]
+
+        # 选择还没有 master 的节点
         if {[dict get $me slaveof] eq {-}} {return $id}
     }
     fail "No available slaves"
@@ -94,16 +103,22 @@ proc cluster_allocate_slaves {masters slaves} {
         set master_id [expr {$j % $masters}]
         set slave_id [cluster_find_available_slave $masters]
         set master_myself [get_myself $master_id]
+        # 执行 cluster replicate 命令，建立主从关系
         R $slave_id cluster replicate [dict get $master_myself id]
     }
 }
 
 # Create a cluster composed of the specified number of masters and slaves.
+# 入参分别为 master 和 slave 的数量
 proc create_cluster {masters slaves} {
+    # 为 master 分配 slot
     cluster_allocate_slots $masters
+
+    # 为 master 分配 slave
     if {$slaves} {
         cluster_allocate_slaves $masters $slaves
     }
+    # 等待 cluster_state 为 ok
     assert_cluster_state ok
 }
 

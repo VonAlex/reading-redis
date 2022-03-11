@@ -35,6 +35,7 @@
 #define __xstr(s) __str(s)
 #define __str(s) #s
 
+// tcmalloc
 #if defined(USE_TCMALLOC)
 #define ZMALLOC_LIB ("tcmalloc-" __xstr(TC_VERSION_MAJOR) "." __xstr(TC_VERSION_MINOR))
 #include <google/tcmalloc.h>
@@ -45,6 +46,7 @@
 #error "Newer version of tcmalloc required"
 #endif
 
+// jemalloc
 #elif defined(USE_JEMALLOC)
 #define ZMALLOC_LIB ("jemalloc-" __xstr(JEMALLOC_VERSION_MAJOR) "." __xstr(JEMALLOC_VERSION_MINOR) "." __xstr(JEMALLOC_VERSION_BUGFIX))
 #include <jemalloc/jemalloc.h>
@@ -55,6 +57,7 @@
 #error "Newer version of jemalloc required"
 #endif
 
+// mac 系统
 #elif defined(__APPLE__)
 #include <malloc/malloc.h>
 #define HAVE_MALLOC_SIZE 1

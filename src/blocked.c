@@ -97,6 +97,8 @@ int getTimeoutFromObjectOrReply(client *c, robj *object, mstime_t *timeout, int 
 /* Block a client for the specific operation type. Once the CLIENT_BLOCKED
  * flag is set client query buffer is not longer processed, but accumulated,
  * and will be processed when the client is unblocked. */
+// 以指定类型阻塞 client。一旦 client 设置了 CLIENT_BLOCKED 标识，
+// client query buffer 将会一直累积，不会处理，直到 client 解阻塞。
 void blockClient(client *c, int btype) {
     c->flags |= CLIENT_BLOCKED;
     c->btype = btype;
@@ -165,12 +167,17 @@ void replyToBlockedClientTimedOut(client *c) {
 }
 
 /* Mass-unblock clients because something changed in the instance that makes
- * blocking no longer safe. For example clients blocked in list operations
+ * blocking no longer safe. 
+ * 批量 unblock 客户端，因为我马上要更改 master 了，数据发生变化了，阻塞在这里没有意义
+ *
+ * For example clients blocked in list operations
  * in an instance which turns from master to slave is unsafe, so this function
  * is called when a master turns into a slave.
  *
  * The semantics is to send an -UNBLOCKED error to the client, disconnecting
- * it at the same time. */
+ * it at the same time. 
+ * 在这种场景下，发送一个 -UNBLOCKED  错误给 client，同时断掉连接
+ */
 void disconnectAllBlockedClients(void) {
     listNode *ln;
     listIter li;

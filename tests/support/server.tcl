@@ -1,4 +1,6 @@
 set ::global_overrides {}
+
+# 保存了正在运行的 tag
 set ::tags {}
 set ::valgrind_errors {}
 
@@ -10,18 +12,6 @@ proc start_server_error {config_file error} {
     append err "\nERROR:"
     append err [string trim $error]
     send_data_packet $::test_server_fd err $err
-}
-
-proc check_valgrind_errors stderr {
-    set fd [open $stderr]
-    set buf [read $fd]
-    close $fd
-
-    if {[regexp -- { at 0x} $buf] ||
-        (![regexp -- {definitely lost: 0 bytes} $buf] &&
-         ![regexp -- {no leaks are possible} $buf])} {
-        send_data_packet $::test_server_fd err "Valgrind error: $buf\n"
-    }
 }
 
 proc kill_server config {
@@ -140,6 +130,8 @@ proc tags {tags code} {
 proc start_server {options {code undefined}} {
     # If we are running against an external server, we just push the
     # host/port pair in the stack the first time
+
+    # 脚本运行时加了 --host，就不需要新建启动 server 了，直接创建 client 连接
     if {$::external} {
         if {[llength $::servers] == 0} {
             set srv {}
@@ -152,6 +144,7 @@ proc start_server {options {code undefined}} {
             # append the server to the stack
             lappend ::servers $srv
         }
+        # 去上层执行代码
         uplevel 1 $code
         return
     }
@@ -176,12 +169,17 @@ proc start_server {options {code undefined}} {
         }
     }
 
+    # 解析配置文件，并保存到 config 里
     set data [split [exec cat "tests/assets/$baseconfig"] "\n"]
     set config {}
     foreach line $data {
+        # 过滤掉空行和注释行
         if {[string length $line] > 0 && [string index $line 0] ne "#"} {
+            # split 配置项及其值
             set elements [split $line " "]
+            # 配置项
             set directive [lrange $elements 0 0]
+            # 配置项的值
             set arguments [lrange $elements 1 end]
             dict set config $directive $arguments
         }
@@ -195,11 +193,13 @@ proc start_server {options {code undefined}} {
     dict set config port $::port
 
     # apply overrides from global space and arguments
+    # 有些需要重写的配置到 config 里
     foreach {directive arguments} [concat $::global_overrides $overrides] {
         dict set config $directive $arguments
     }
 
     # write new configuration to temporary file
+    # 将上面聚合到的配置都写入临时配置文件
     set config_file [tmpfile redis.conf]
     set fp [open $config_file w+]
     foreach directive [dict keys $config] {
@@ -218,6 +218,7 @@ proc start_server {options {code undefined}} {
     }
 
     # Tell the test server about this new instance.
+    # 告诉 server，有一个新的实例产生了， pid 为 $pid
     send_data_packet $::test_server_fd server-spawned $pid
 
     # check that the server actually started
@@ -323,5 +324,17 @@ proc start_server {options {code undefined}} {
     } else {
         set ::tags [lrange $::tags 0 end-[llength $tags]]
         set _ $srv
+    }
+}
+
+proc check_valgrind_errors stderr {
+    set fd [open $stderr]
+    set buf [read $fd]
+    close $fd
+
+    if {[regexp -- { at 0x} $buf] ||
+        (![regexp -- {definitely lost: 0 bytes} $buf] &&
+         ![regexp -- {no leaks are possible} $buf])} {
+        send_data_packet $::test_server_fd err "Valgrind error: $buf\n"
     }
 }

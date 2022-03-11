@@ -33,24 +33,25 @@
 #ifndef __SDS_H
 #define __SDS_H
 
-#define SDS_MAX_PREALLOC (1024*1024)
+#define SDS_MAX_PREALLOC (1024*1024) //预先分配内存的最大长度
 
 #include <sys/types.h>
 #include <stdarg.h>
 #include <stdint.h>
 
-typedef char *sds;
+typedef char *sds; // sds兼容传统C风格字符串
 
+// header 定义，共有五种，0-4
 /* Note: sdshdr5 is never used, we just access the flags byte directly.
  * However is here to document the layout of type 5 SDS strings. */
 struct __attribute__ ((__packed__)) sdshdr5 {
-    unsigned char flags; /* 3 lsb of type, and 5 msb of string length */
+    unsigned char flags; /* 3 lsb of type, and 5 msb of string length ，低三位表示类型，高五位表示字符串长度*/
     char buf[];
 };
 struct __attribute__ ((__packed__)) sdshdr8 {
-    uint8_t len; /* used */
-    uint8_t alloc; /* excluding the header and null terminator */
-    unsigned char flags; /* 3 lsb of type, 5 unused bits */
+    uint8_t len; /* used  SDS已使用的空间 */
+    uint8_t alloc; /* excluding the header and null terminator 申请到的空间。header 和字符串结尾的 '\0' 不算在内*/
+    unsigned char flags; /* 3 lsb of type, 5 unused bits ，低三位表示类型， 高五位未使用*/
     char buf[];
 };
 struct __attribute__ ((__packed__)) sdshdr16 {
@@ -71,21 +72,29 @@ struct __attribute__ ((__packed__)) sdshdr64 {
     unsigned char flags; /* 3 lsb of type, 5 unused bits */
     char buf[];
 };
+ /* 最后一个变量 buf 为柔性数组，只能定义在一个结构体的最后一个字段上。它在这里只是起到一个标记的作用，
+  * 表示在flags字段后面就是一个字符数组，或者说，它指明了紧跟在flags字段后面的这个字符数组在结构体中的偏移位置。
+  * 而程序在为header分配的内存的时候，它并不占用内存空间。
+  * 如果计算sizeof(struct sdshdr16)的值，那么结果是5个字节，其中buf字段不算在内*/
 
 #define SDS_TYPE_5  0
 #define SDS_TYPE_8  1
 #define SDS_TYPE_16 2
 #define SDS_TYPE_32 3
 #define SDS_TYPE_64 4
-#define SDS_TYPE_MASK 7
-#define SDS_TYPE_BITS 3
+
+#define SDS_TYPE_MASK 7 // type 掩码，与 flag 相与，可以取低三位
+#define SDS_TYPE_BITS 3 // type 长度
+
+// 获取 sds 的 header 头指针
+// T 为 sds 类型， s 为 sds 中 buf 的地址
 #define SDS_HDR_VAR(T,s) struct sdshdr##T *sh = (void*)((s)-(sizeof(struct sdshdr##T)));
 #define SDS_HDR(T,s) ((struct sdshdr##T *)((s)-(sizeof(struct sdshdr##T))))
-#define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS)
+#define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS) // sds5 高五位表示长度
 
 static inline size_t sdslen(const sds s) {
-    unsigned char flags = s[-1];
-    switch(flags&SDS_TYPE_MASK) {
+    unsigned char flags = s[-1]; // flag
+    switch(flags&SDS_TYPE_MASK) { // 确定 sds 类型
         case SDS_TYPE_5:
             return SDS_TYPE_5_LEN(flags);
         case SDS_TYPE_8:
@@ -99,7 +108,7 @@ static inline size_t sdslen(const sds s) {
     }
     return 0;
 }
-
+// 获取目前 sds 可用的空间
 static inline size_t sdsavail(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -107,7 +116,7 @@ static inline size_t sdsavail(const sds s) {
             return 0;
         }
         case SDS_TYPE_8: {
-            SDS_HDR_VAR(8,s);
+            SDS_HDR_VAR(8,s); 
             return sh->alloc - sh->len;
         }
         case SDS_TYPE_16: {
@@ -126,13 +135,14 @@ static inline size_t sdsavail(const sds s) {
     return 0;
 }
 
+// 设置 sds 的 len 字段值为 newlen
 static inline void sdssetlen(sds s, size_t newlen) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
         case SDS_TYPE_5:
             {
-                unsigned char *fp = ((unsigned char*)s)-1;
-                *fp = SDS_TYPE_5 | (newlen << SDS_TYPE_BITS);
+                unsigned char *fp = ((unsigned char*)s)-1; // fp 指向结构体头部
+                *fp = SDS_TYPE_5 | (newlen << SDS_TYPE_BITS); //  长度|类型
             }
             break;
         case SDS_TYPE_8:
@@ -150,6 +160,7 @@ static inline void sdssetlen(sds s, size_t newlen) {
     }
 }
 
+// sds 的长度增加 inc==> len 变量加 inc
 static inline void sdsinclen(sds s, size_t inc) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -214,31 +225,31 @@ static inline void sdssetalloc(sds s, size_t newlen) {
     }
 }
 
-sds sdsnewlen(const void *init, size_t initlen);
-sds sdsnew(const char *init);
-sds sdsempty(void);
-sds sdsdup(const sds s);
-void sdsfree(sds s);
-sds sdsgrowzero(sds s, size_t len);
-sds sdscatlen(sds s, const void *t, size_t len);
+sds sdsnewlen(const void *init, size_t initlen); //创建一个长度为initlen的字符串,并保存init字符串中的值
+sds sdsnew(const char *init); //创建一个默认长度的字符串
+sds sdsempty(void); //建立一个只有表头，字符串为空"\0"的sds
+sds sdsdup(const sds s); // 复制一份 sds 字符串
+void sdsfree(sds s); // 释放 sds 字符串和 header
+sds sdsgrowzero(sds s, size_t len); // 将 sds 的长度拓宽至 len
+sds sdscatlen(sds s, const void *t, size_t len);//将字符串t追加到s表头的buf末尾，追加len个字节
 sds sdscat(sds s, const char *t);
 sds sdscatsds(sds s, const sds t);
-sds sdscpylen(sds s, const char *t, size_t len);
+sds sdscpylen(sds s, const char *t, size_t len); //将字符串t覆盖到s表头的buf中，拷贝len个字节
 sds sdscpy(sds s, const char *t);
 
-sds sdscatvprintf(sds s, const char *fmt, va_list ap);
+sds sdscatvprintf(sds s, const char *fmt, va_list ap); //打印函数，被 sdscatprintf 所调用
 #ifdef __GNUC__
 sds sdscatprintf(sds s, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 #else
-sds sdscatprintf(sds s, const char *fmt, ...);
+sds sdscatprintf(sds s, const char *fmt, ...); //打印任意数量个字符串，并将这些字符串追加到给定 sds 的末尾
 #endif
 
 sds sdscatfmt(sds s, char const *fmt, ...);
 sds sdstrim(sds s, const char *cset);
 void sdsrange(sds s, int start, int end);
-void sdsupdatelen(sds s);
-void sdsclear(sds s);
+void sdsupdatelen(sds s); // 更新 sds 的长度为 strlen(sds),修改 header 的 len 字段
+void sdsclear(sds s);// 将 header 的 len 字段置为0， buf 置为 '\0',但是不释放 buf（惰性释放）
 int sdscmp(const sds s1, const sds s2);
 sds *sdssplitlen(const char *s, int len, const char *sep, int seplen, int *count);
 void sdsfreesplitres(sds *tokens, int count);
@@ -252,11 +263,11 @@ sds sdsjoin(char **argv, int argc, char *sep);
 sds sdsjoinsds(sds *argv, int argc, const char *sep, size_t seplen);
 
 /* Low level functions exposed to the user API */
-sds sdsMakeRoomFor(sds s, size_t addlen);
-void sdsIncrLen(sds s, int incr);
-sds sdsRemoveFreeSpace(sds s);
-size_t sdsAllocSize(sds s);
-void *sdsAllocPtr(sds s);
+sds sdsMakeRoomFor(sds s, size_t addlen); // 对 sds 中 buf 的长度进行扩展
+void sdsIncrLen(sds s, int incr); //根据incr的正负，移动字符串末尾的'\0'标志
+sds sdsRemoveFreeSpace(sds s); // 回收sds中的未使用空间
+size_t sdsAllocSize(sds s); // 获得sds所有分配的空间
+void *sdsAllocPtr(sds s); // sds header 的头指针
 
 /* Export the allocator used by SDS to the program using SDS.
  * Sometimes the program SDS is linked to, may use a different set of

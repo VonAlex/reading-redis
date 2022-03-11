@@ -1,35 +1,55 @@
 /* The ziplist is a specially encoded dually linked list that is designed
- * to be very memory efficient. It stores both strings and integer values,
+ * to be very memory efficient. 
+ * ziplist 是一个特殊编码的双向链表，旨在提高内存效率。
+ *
+ * It stores both strings and integer values,
+ * 用来存储存储 string 和 integer 值，
  * where integers are encoded as actual integers instead of a series of
- * characters. It allows push and pop operations on either side of the list
- * in O(1) time. However, because every operation requires a reallocation of
+ * characters. 
+ * integers 被编码成实际整数，而不是一系列字符。
+ *
+ * It allows push and pop operations on either side of the list in O(1) time. 
+ * 它允许在 list 两端以 O(1) 的时间复杂度做 push 和 pop 操作。
+ *
+ * However, because every operation requires a reallocation of
  * the memory used by the ziplist, the actual complexity is related to the
  * amount of memory used by the ziplist.
- *
+ * 然而，因为每个操作需要重新分配被 ziplist 使用的内存，实际的复杂度与 ziplist 使用的内存总量有关。
  * ----------------------------------------------------------------------------
  *
- * ZIPLIST OVERALL LAYOUT:
+ * ZIPLIST OVERALL LAYOUT: ZIPLIST 总体格式
  * The general layout of the ziplist is as follows:
  * <zlbytes><zltail><zllen><entry><entry><zlend>
  *
  * <zlbytes> is an unsigned integer to hold the number of bytes that the
- * ziplist occupies. This value needs to be stored to be able to resize the
+ * ziplist occupies. 
+ * <zlbytes> 32 bit 是一个无符号整数，用来保存 ziplist 占用的字节数。
+ *
+ * This value needs to be stored to be able to resize the
  * entire structure without the need to traverse it first.
+ * 需要存储这个值，以便能够调整整个结构的大小，而无需先遍历它。
  *
  * <zltail> is the offset to the last entry in the list. This allows a pop
  * operation on the far side of the list without the need for full traversal.
+ * <zltail> 32 bit 表示 list 中最后一个 entry 的偏移量。可以快速找到 tail，在不遍历链表的情况下，方便在 tail 做 pop/push。
  *
  * <zllen> is the number of entries.When this value is larger than 2**16-2,
  * we need to traverse the entire list to know how many items it holds.
+ * <zllen> 16 bit 表示 ziplist 里 entry 的数量，最多可以表示 2^16-1。
+ * 当这个值超过了 2^16-1，如果要知道 ziplist 里有多少个元素，就需要遍历整个链表了，因为 zllen 表示 16 个 1，表示不了更大的数，这个选项就废掉了。
  *
  * <zlend> is a single byte special value, equal to 255, which indicates the
  * end of the list.
+ * <zlend> 表示 ziplist 最后一个字节，是一个结束标记，值固定等于255。
  *
- * ZIPLIST ENTRIES:
+ * ZIPLIST ENTRIES:( <prevrawlen><len><data> )
  * Every entry in the ziplist is prefixed by a header that contains two pieces
  * of information. First, the length of the previous entry is stored to be
  * able to traverse the list from back to front. Second, the encoding with an
  * optional string length of the entry itself is stored.
+ * ziplist 里每一个元素都有一个前缀，该前缀包含两个信息。
+ * <prevrawlen>，前一个 entry 占用的总字节数，这个字段的用处是为了让 ziplist 能够从后向前遍历，采用变长编码。
+ * <len>: 表示当前 entry 的数据长度（即<data>部分的长度）。也采用变长编码。
  *
  * The length of the previous entry is encoded in the following way:
  * If this length is smaller than 254 bytes, it will only consume a single
@@ -37,13 +57,21 @@
  * equal to 254, it will consume 5 bytes. The first byte is set to 254 to
  * indicate a larger value is following. The remaining 4 bytes take the
  * length of the previous entry as value.
+ * 前一个 entry 的长度以下方式编码：
+ * 如果长度小于 254 字节，那么 <prevrawlen> 就只用一个字节来表示，这个字节的值就是前一个 entry 的占用字节数。
+ * 否则，将消耗 5 个字节。第一个字节置为 254，后面 4个字节组成一个整型值，来真正存储前一个 entry 的占用字节数。。
  *
  * The other header field of the entry itself depends on the contents of the
  * entry. When the entry is a string, the first 2 bits of this header will hold
  * the type of encoding used to store the length of the string, followed by the
  * actual length of the string. When the entry is an integer the first 2 bits
  * are both set to 1. The following 2 bits are used to specify what kind of
- * integer will be stored after this header. An overview of the different
+ * integer will be stored after this header. 
+ * entry 另一个 header field 依赖于 entry 的内容。
+ * 如果 entry 是一个字符串，header 开始的 2 bit 表示存储这个字符串长度使用的编码类型，后面紧跟字符串长度。
+ * 如果 entry 是一个整数，header 开始的 2 bit 都设置成 1，紧跟着 2 bit 用来指定 header 之后要存储什么类型的 integer。
+ *
+ * An overview of the different
  * types and encodings is as follows:
  *
  * |00pppppp| - 1 byte

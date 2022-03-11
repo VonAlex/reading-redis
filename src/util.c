@@ -65,13 +65,13 @@ int stringmatchlen(const char *pattern, int patternLen,
             }
             return 0; /* no match */
             break;
-        case '?':
+        case '?': // 模式当前字符为 ？，则直接跳过 string 当前字符，从下一个字符开始判断
             if (stringLen == 0)
                 return 0; /* no match */
             string++;
             stringLen--;
             break;
-        case '[':
+        case '[': // 模式当前字符为 [, 范围，需要根据下一个字符确定是否为 ^
         {
             int not, match;
 
@@ -139,7 +139,7 @@ int stringmatchlen(const char *pattern, int patternLen,
                 patternLen--;
             }
             /* fall through */
-        default:
+        default: // 如果没有正则表达式的关键字符，则直接比较
             if (!nocase) {
                 if (pattern[0] != string[0])
                     return 0; /* no match */

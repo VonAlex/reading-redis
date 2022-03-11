@@ -67,13 +67,13 @@ void zlibc_free(void *ptr) {
 #define free(ptr) je_free(ptr)
 #endif
 
-#if defined(__ATOMIC_RELAXED)
+#if defined(__ATOMIC_RELAXED) // gcc 原子操作，无锁化
 #define update_zmalloc_stat_add(__n) __atomic_add_fetch(&used_memory, (__n), __ATOMIC_RELAXED)
 #define update_zmalloc_stat_sub(__n) __atomic_sub_fetch(&used_memory, (__n), __ATOMIC_RELAXED)
 #elif defined(HAVE_ATOMIC)
 #define update_zmalloc_stat_add(__n) __sync_add_and_fetch(&used_memory, (__n))
 #define update_zmalloc_stat_sub(__n) __sync_sub_and_fetch(&used_memory, (__n))
-#else
+#else // 通过锁实现并发互斥与同步
 #define update_zmalloc_stat_add(__n) do { \
     pthread_mutex_lock(&used_memory_mutex); \
     used_memory += (__n); \
@@ -88,6 +88,11 @@ void zlibc_free(void *ptr) {
 
 #endif
 
+ // 第 1 个 if，判断分配的内存空间的大小是不是8的倍数（_n&7==0），sizeof(long)-1 = 7
+ // 如果不是，需要加上相应的偏移量使之变成8的倍数。_n&7 等价于 _n%8，不过位操作的效率显然更高。
+ // malloc()本身能够保证所分配的内存是8字节对齐的：如果你要分配的内存不是8的倍数，那么malloc就会多分配一点，来凑成8的倍数。
+ // 所以update_zmalloc_stat_alloc函数（或者说zmalloc()相对malloc()而言）
+ // 真正要实现的功能并不是进行8字节对齐（malloc已经保证了），它的真正目的是使变量used_memory精确的维护实际已分配内存的大小。
 #define update_zmalloc_stat_alloc(__n) do { \
     size_t _n = (__n); \
     if (_n&(sizeof(long)-1)) _n += sizeof(long)-(_n&(sizeof(long)-1)); \
@@ -121,14 +126,25 @@ static void zmalloc_default_oom(size_t size) {
 
 static void (*zmalloc_oom_handler)(size_t) = zmalloc_default_oom;
 
+// 申请内存时，多申请 PREFIX_SIZE 个字节，用于存放 size（针对 HAVE_MALLOC_SIZE 为 0），
+// 精确更新 used_memory 时还要做 8 字节对齐
+//  ptr           Real_ptr
+//  ↓               ↓
+//  |  PREFIX_SIZE  |   size    |
 void *zmalloc(size_t size) {
     void *ptr = malloc(size+PREFIX_SIZE);
 
     if (!ptr) zmalloc_oom_handler(size);
+// HAVE_MALLOC_SIZE 底层库是否支持通过堆上指针获取该空间大小的功能
+// 如果支持，使用 zmalloc_size 获取刚分配的空间大小，并累计到记录整个程序申请的堆空间大小上
+// 然后返回申请了的地址。此时虽然用户申请的只是size的大小，但是实际给了size+PREFIX_SIZE的大小。
 #ifdef HAVE_MALLOC_SIZE
     update_zmalloc_stat_alloc(zmalloc_size(ptr));
     return ptr;
 #else
+// 如果内存库不支持, 在申请的内存前sizeof(size_t)大小的空间里保存用户需要申请的空间大小size。
+// 累计到记录整个程序申请堆空间大小上的也是实际申请的大小。最后返回的是偏移了头大小的内存地址。
+// 此时用户拿到的空间就是自己要求申请的空间大小。
     *((size_t*)ptr) = size;
     update_zmalloc_stat_alloc(size+PREFIX_SIZE);
     return (char*)ptr+PREFIX_SIZE;
@@ -182,6 +198,12 @@ void *zrealloc(void *ptr, size_t size) {
  * malloc itself, given that in that case we store a header with this
  * information as the first bytes of every allocation. */
 #ifndef HAVE_MALLOC_SIZE
+// zmalloc(size) 在分配内存的时候会多申请sizeof(size_t)个字节大小的内存,一共申请分配size+8个字节
+// zmalloc(size)会在已分配内存的首地址开始的8字节中存储size的值，
+// 实际上因为内存对齐，malloc(size+8)分配的内存可能会比size+8要多一些，目的是凑成8的倍数.
+// 所以实际分配的内存大小是size+8+X【(size+8+X)%8==0 (0<=X<=7)】。然后内存指针会向右偏移8个字节的长度。
+// 然后内存指针会向右偏移8个字节的长度。zfree()就是zmalloc()的一个逆操作，
+// 而 zmalloc_size() 的目的就是计算出 size+8+X 的总大小。
 size_t zmalloc_size(void *ptr) {
     void *realptr = (char*)ptr-PREFIX_SIZE;
     size_t size = *((size_t*)realptr);
@@ -261,8 +283,11 @@ void zmalloc_set_oom_handler(void (*oom_handler)(size_t)) {
 #include <sys/stat.h>
 #include <fcntl.h>
 
+// 获取 RSS 大小
+// Resident Set Size，表示当前进程实际所驻留在内存中的空间大小，即不包括被交换（swap）出去的空间。
+// 从 /proc/<pid>/stat 文件中获得 rss 信息，单位是 pages
 size_t zmalloc_get_rss(void) {
-    int page = sysconf(_SC_PAGESIZE);
+    int page = sysconf(_SC_PAGESIZE); // 一页多少字节
     size_t rss;
     char buf[4096];
     char filename[256];
@@ -323,6 +348,7 @@ size_t zmalloc_get_rss(void) {
 }
 #endif
 
+// 内部内存碎片率, 是已经被分配出去（能明确指出属于哪个进程）却不能被利用的内存空间，直到进程释放掉，才能被系统利用
 /* Fragmentation = RSS / allocated-bytes */
 float zmalloc_get_fragmentation_ratio(size_t rss) {
     return (float)rss/zmalloc_used_memory();
@@ -365,6 +391,7 @@ size_t zmalloc_get_private_dirty(void) {
     return zmalloc_get_smap_bytes_by_field("Private_Dirty:");
 }
 
+// 跨平台获得 RAM
 /* Returns the size of physical memory (RAM) in bytes.
  * It looks ugly, but this is the cleanest way to achive cross platform results.
  * Cleaned up from:
@@ -419,5 +446,3 @@ size_t zmalloc_get_memory_size(void) {
     return 0L;          /* Unknown OS. */
 #endif
 }
-
-

@@ -9,6 +9,7 @@ source ../../support/cluster.tcl ; # Redis Cluster client.
 
 set ::instances_count 20 ; # How many instances we use at max.
 
+# tclsh tests/cluster/run.tcl --help
 proc main {} {
     parse_options
     spawn_instance redis $::redis_base_port $::instances_count {

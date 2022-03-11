@@ -20,6 +20,7 @@ start_server {tags {"auth"} overrides {requirepass foobar}} {
         r auth foobar
     } {OK}
 
+    # 三个参数，最后一个表示预期结果
     test {Once AUTH succeeded we can actually send commands to the server} {
         r set foo 100
         r incr foo

@@ -677,7 +677,7 @@ void loadServerConfig(char *filename, char *options) {
         config = sdscat(config,"\n");
         config = sdscat(config,options);
     }
-    loadServerConfigFromString(config);
+    loadServerConfigFromString(config); // 加载配置文件
     sdsfree(config);
 }
 

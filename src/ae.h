@@ -63,24 +63,26 @@ typedef void aeBeforeSleepProc(struct aeEventLoop *eventLoop);
 
 /* File event structure */
 typedef struct aeFileEvent {
-    int mask; /* one of AE_(READABLE|WRITABLE) */
-    aeFileProc *rfileProc;
-    aeFileProc *wfileProc;
-    void *clientData;
+    int mask; /* one of AE_(READABLE|WRITABLE) 要捕获的事件的掩码（读|写）*/
+    aeFileProc *rfileProc; // 当 fd 可读时执行的处理函数（accept，read）
+    aeFileProc *wfileProc; //当 fd 可写时执行的处理函数（write）
+    void *clientData;  // caller 传入的数据指针
 } aeFileEvent;
 
 /* Time event structure */
+// 定时器事件是一个链表形式存储的各个时间事件，无序的
 typedef struct aeTimeEvent {
     long long id; /* time event identifier. */
     long when_sec; /* seconds */
     long when_ms; /* milliseconds */
     aeTimeProc *timeProc;
-    aeEventFinalizerProc *finalizerProc;
+    aeEventFinalizerProc *finalizerProc; // 定时器被删除的时候的回调函数
     void *clientData;
     struct aeTimeEvent *next;
 } aeTimeEvent;
 
 /* A fired event */
+//从 epoll_wait 或者 select 返回的，已经触发的文件事件
 typedef struct aeFiredEvent {
     int fd;
     int mask;
@@ -88,16 +90,16 @@ typedef struct aeFiredEvent {
 
 /* State of an event based program */
 typedef struct aeEventLoop {
-    int maxfd;   /* highest file descriptor currently registered */
-    int setsize; /* max number of file descriptors tracked */
+    int maxfd;   /* highest file descriptor currently registered 当前注册的 fd，仅仅是 select 使用 */
+    int setsize; /* max number of file descriptors tracked 监控的 fd 数量 */
     long long timeEventNextId;
-    time_t lastTime;     /* Used to detect system clock skew */
+    time_t lastTime;     /* Used to detect system clock skew 用来诊断系统时间偏差 */
     aeFileEvent *events; /* Registered events */
     aeFiredEvent *fired; /* Fired events */
-    aeTimeEvent *timeEventHead;
+    aeTimeEvent *timeEventHead; // 时间事件是一个链表
     int stop;
     void *apidata; /* This is used for polling API specific data */
-    aeBeforeSleepProc *beforesleep;
+    aeBeforeSleepProc *beforesleep; // 阻塞地等待下一个事件发生之前要执行的函数
 } aeEventLoop;
 
 /* Prototypes */

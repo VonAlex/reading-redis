@@ -11,6 +11,7 @@ source tests/support/tmpfile.tcl
 source tests/support/test.tcl
 source tests/support/util.tcl
 
+# 所有的单元测试
 set ::all_tests {
     unit/printver
     unit/dump
@@ -57,21 +58,20 @@ set ::all_tests {
 }
 # Index to the next test to run in the ::all_tests list.
 set ::next_test 0
-
 set ::host 127.0.0.1
 set ::port 21111
 set ::traceleaks 0
 set ::valgrind 0
 set ::verbose 0
-set ::quiet 0
+set ::quiet 0;       # 是否打印必要的日志
 set ::denytags {}
 set ::allowtags {}
-set ::external 0; # If "1" this means, we are running against external instance
-set ::file ""; # If set, runs only the tests in this comma separated list
-set ::curfile ""; # Hold the filename of the current suite
-set ::accurate 0; # If true runs fuzz tests with more iterations
+set ::external 0;    # If "1" this means, we are running against external instance
+set ::file "";       # If set, runs only the tests in this comma separated list
+set ::curfile "";    # Hold the filename of the current suite
+set ::accurate 0;    # If true runs fuzz tests with more iterations
 set ::force_failure 0
-set ::timeout 600; # 10 minutes without progresses will quit the test.
+set ::timeout 600;   # 10 minutes without progresses will quit the test.
 set ::last_progress [clock seconds]
 set ::active_servers {} ; # Pids of active Redis instances.
 
@@ -86,16 +86,24 @@ set ::numclients 16
 proc execute_tests name {
     set path "tests/$name.tcl"
     set ::curfile $path
-    source $path
+    source $path; # 运行单元测试
+
+    # 通知服务端，本单元测试执行完成了
     send_data_packet $::test_server_fd done "$name"
 }
 
 # Setup a list to hold a stack of server configs. When calls to start_server
 # are nested, use "srv 0 pid" to get the pid of the inner server. To access
 # outer servers, use "srv -1 pid" etcetera.
+# 一个 server 配置的栈
+# srv 0 pid 获得内层 server 的 pid，srv -1 pid 获得外层的
 set ::servers {}
+
+# 当 start_server 做嵌套调用时，srv 0 pid 来获得内层 server 的 pid
+# srv -1 pid 获得外层 server 的 pid
 proc srv {args} {
     set level 0
+    # $args 第 1 个参数是个数字，那么把 1st param 当做 level， 2rd param 当做 property
     if {[string is integer [lindex $args 0]]} {
         set level [lindex $args 0]
         set property [lindex $args 1]
@@ -109,6 +117,7 @@ proc srv {args} {
 # Provide easy access to the client for the inner server. It's possible to
 # prepend the argument list with a negative level to access clients for
 # servers running in outer blocks.
+# 更方便地使用到外层 client
 proc r {args} {
     set level 0
     if {[string is integer [lindex $args 0]]} {
@@ -118,6 +127,7 @@ proc r {args} {
     [srv $level "client"] {*}$args
 }
 
+# 生成一个 client，args 为不定参数
 proc reconnect {args} {
     set level [lindex $args 0]
     if {[string length $level] == 0 || ![string is integer $level]} {
@@ -177,21 +187,33 @@ proc cleanup {} {
 proc test_server_main {} {
     cleanup
     set tclsh [info nameofexecutable]
+
     # Open a listening socket, trying different ports in order to find a
     # non busy one.
     set port [find_available_port 11111]
+
     if {!$::quiet} {
         puts "Starting test server at port $port"
     }
+
+    # 创建 socket，监听端口 $port，回调函数 accept_test_clients，当 client 连接时触发
     socket -server accept_test_clients -myaddr 127.0.0.1 $port
 
     # Start the client instances
+    # 保存所有 client 的 pid
     set ::clients_pids {}
+
+    # ::port 默认 21111 或由 --port 指定
     set start_port [expr {$::port+100}]
+
+     # ::numclients 为启动的 client 数量，默认为 16 或者通过 --clients 指定，但，慢机器上为 1
     for {set j 0} {$j < $::numclients} {incr j} {
         set start_port [find_available_port $start_port]
-        set p [exec $tclsh [info script] {*}$::argv \
-            --client $port --port $start_port &]
+
+        # 启动一个 client
+        # info script 如果当前有脚本文件正在 Tcl 解释器中执行，则返回最内层处于激活状态的脚本文件名
+        set p [exec $tclsh [info script] {*}$::argv --client $port --port $start_port &]
+
         lappend ::clients_pids $p
         incr start_port 10
     }
@@ -213,6 +235,7 @@ proc test_server_main {} {
 proc test_server_cron {} {
     set elapsed [expr {[clock seconds]-$::last_progress}]
 
+    # 超时了，需要关闭所有的 client
     if {$elapsed > $::timeout} {
         set err "\[[colorstr red TIMEOUT]\]: clients state report follows."
         puts $err
@@ -246,6 +269,8 @@ proc accept_test_clients {fd addr port} {
 proc read_from_test_client fd {
     set bytes [gets $fd]
     set payload [read $fd $bytes]
+
+    # 获得 status 和 data
     foreach {status data} $payload break
     set ::last_progress [clock seconds]
 
@@ -256,12 +281,18 @@ proc read_from_test_client fd {
         signal_idle_client $fd
     } elseif {$status eq {done}} {
         set elapsed [expr {[clock seconds]-$::clients_start_time($fd)}]
+
+        # 所有单元测试的数量
         set all_tests_count [llength $::all_tests]
+
+        # 活跃 client 的数量
         set running_tests_count [expr {[llength $::active_clients]-1}]
+
         set completed_tests_count [expr {$::next_test-$running_tests_count}]
         puts "\[$completed_tests_count/$all_tests_count [colorstr yellow $status]\]: $data ($elapsed seconds)"
         lappend ::clients_time_history $elapsed $data
         signal_idle_client $fd
+
         set ::active_clients_task($fd) DONE
     } elseif {$status eq {ok}} {
         if {!$::quiet} {
@@ -283,6 +314,8 @@ proc read_from_test_client fd {
     } elseif {$status eq {server-spawned}} {
         lappend ::active_servers $data
     } elseif {$status eq {server-killed}} {
+
+        # 从 ::active_servers 中删掉 kill 的 server
         set ::active_servers [lsearch -all -inline -not -exact $::active_servers $data]
     } else {
         if {!$::quiet} {
@@ -325,18 +358,23 @@ proc signal_idle_client fd {
 
     if 0 {show_clients_state}
 
-    # New unit to process?
+    # New unit to process? 还有新的单元测试要跑吗？
+    # 所有的单元测试交给 N 个 cliet 去跑，共同完成测试任务
     if {$::next_test != [llength $::all_tests]} {
         if {!$::quiet} {
             puts [colorstr bold-white "Testing [lindex $::all_tests $::next_test]"]
             set ::active_clients_task($fd) "ASSIGNED: $fd ([lindex $::all_tests $::next_test])"
         }
         set ::clients_start_time($fd) [clock seconds]
+
+        # client 跑下一个单元测试
         send_data_packet $fd run [lindex $::all_tests $::next_test]
         lappend ::active_clients $fd
         incr ::next_test
     } else {
         lappend ::idle_clients $fd
+
+        # 没有单元测试可供 client 跑了
         if {[llength $::active_clients] == 0} {
             the_end
         }
@@ -369,13 +407,17 @@ proc the_end {} {
 # The client is not even driven (the test server is instead) as we just need
 # to read the command, execute, reply... all this in a loop.
 proc test_client_main server_port {
+    # 创建 socketfd, 连接服务端
     set ::test_server_fd [socket localhost $server_port]
+    # 以二进制的形式编码 channel
     fconfigure $::test_server_fd -encoding binary
+
     send_data_packet $::test_server_fd ready [pid]
     while 1 {
         set bytes [gets $::test_server_fd]
         set payload [read $::test_server_fd $bytes]
         foreach {cmd data} $payload break
+        # run xxx.tcl 运行单元测试
         if {$cmd eq {run}} {
             execute_tests $data
         } else {
@@ -386,7 +428,9 @@ proc test_client_main server_port {
 
 proc send_data_packet {fd status data} {
     set payload [list $status $data]
+    # 发包时先发 length
     puts $fd [string length $payload]
+    # 再发 data
     puts -nonewline $fd $payload
     flush $fd
 }
@@ -406,10 +450,14 @@ proc print_help_screen {} {
 }
 
 # parse arguments
+# 解析所有的参数
 for {set j 0} {$j < [llength $argv]} {incr j} {
+    # 选项
     set opt [lindex $argv $j]
+    # 选项值
     set arg [lindex $argv [expr $j+1]]
     if {$opt eq {--tags}} {
+        # 可以根据 tag 过滤单元测试，- 开头的的 tag 为 deny tags
         foreach tag $arg {
             if {[string index $tag 0] eq "-"} {
                 lappend ::denytags [string range $tag 1 end]
@@ -433,21 +481,26 @@ for {set j 0} {$j < [llength $argv]} {incr j} {
         set ::accurate 1
     } elseif {$opt eq {--force-failure}} {
         set ::force_failure 1
+    # 跑单个测试
     } elseif {$opt eq {--single}} {
         set ::all_tests $arg
         incr j
+    # 列出所有的单元测试
     } elseif {$opt eq {--list-tests}} {
         foreach t $::all_tests {
             puts $t
         }
         exit 0
+    # 保存服务器监听的 port，且以 client 方式启动
     } elseif {$opt eq {--client}} {
         set ::client 1
         set ::test_server_port $arg
         incr j
+    # 设置要启动的 client 数量
     } elseif {$opt eq {--clients}} {
         set ::numclients $arg
         incr j
+    # 设置超时时间
     } elseif {$opt eq {--timeout}} {
         set ::timeout $arg
         incr j
@@ -528,6 +581,7 @@ proc is_a_slow_computer {} {
     expr {$elapsed > 200}
 }
 
+# --client 方式启动
 if {$::client} {
     if {[catch { test_client_main $::test_server_port } err]} {
         set estr "Executing test client: $err.\n$::errorInfo"
@@ -537,6 +591,7 @@ if {$::client} {
         exit 1
     }
 } else {
+     # 如果 computer 性能不行，设置为一个 client
     if {[is_a_slow_computer]} {
         puts "** SLOW COMPUTER ** Using a single client to avoid false positives."
         set ::numclients 1
