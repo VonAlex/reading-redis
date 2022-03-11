@@ -381,6 +381,7 @@ void loadServerConfigFromString(char *config) {
         sdstolower(argv[0]);
 
         /* Iterate the configs that are standard */
+        // 遍历所有的标准配置
         int match = 0;
         for (standardConfig *config = configs; config->name != NULL; config++) {
             if ((!strcasecmp(argv[0],config->name) ||

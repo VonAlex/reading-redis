@@ -475,6 +475,7 @@ void dictRelease(dict *d)
     zfree(d);
 }
 
+/* key 必须是一个 sds */
 dictEntry *dictFind(dict *d, const void *key)
 {
     dictEntry *he;

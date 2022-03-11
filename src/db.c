@@ -191,6 +191,8 @@ void dbAdd(redisDb *db, robj *key, robj *val) {
 /* This is a special version of dbAdd() that is used only when loading
  * keys from the RDB file: the key is passed as an SDS string that is
  * retained by the function (and not freed by the caller).
+ * dbAdd() 的特殊版本，仅仅在从 RDB 文件中加载 key 时使用。
+ * key 是 sds 字符串，由本函数持有，不会被 caller 释放。
  *
  * Moreover this function will not abort if the key is already busy, to
  * give more control to the caller, nor will signal the key as ready
@@ -1683,10 +1685,10 @@ void slotToKeyUpdateKey(sds key, int add) {
     unsigned char *indexed = buf;
 
     server.cluster->slots_keys_count[hashslot] += add ? 1 : -1;
-    if (keylen+2 > 64) indexed = zmalloc(keylen+2);
-    indexed[0] = (hashslot >> 8) & 0xff;
-    indexed[1] = hashslot & 0xff;
-    memcpy(indexed+2,key,keylen);
+    if (keylen+2 > 64) indexed = zmalloc(keylen+2); // 要存 slot 信息，所以长度 + 2
+    indexed[0] = (hashslot >> 8) & 0xff; // slot 高 8 位
+    indexed[1] = hashslot & 0xff; // slot 低 8 位
+    memcpy(indexed+2,key,keylen); // 大端序保存 slot
     if (add) {
         raxInsert(server.cluster->slots_to_keys,indexed,keylen+2,NULL,NULL);
     } else {

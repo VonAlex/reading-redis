@@ -225,10 +225,13 @@ void zmalloc_set_oom_handler(void (*oom_handler)(size_t)) {
 }
 
 /* Get the RSS information in an OS-specific way.
+ * 以特定操作系统的方式获得 RSS。 
  *
  * WARNING: the function zmalloc_get_rss() is not designed to be fast
  * and may not be called in the busy loops where Redis tries to release
  * memory expiring or swapping out objects.
+ * 函数 zmalloc_get_rss() 的设计不是为了快，
+ * 并且在 Redis 尝试释放过期内存或 swap out 对象等 busy loops 可能不会被调用。
  *
  * For this kind of "fast RSS reporting" usages use instead the
  * function RedisEstimateRSS() that is a much faster (and less precise)
@@ -241,7 +244,7 @@ void zmalloc_set_oom_handler(void (*oom_handler)(size_t)) {
 #include <fcntl.h>
 
 size_t zmalloc_get_rss(void) {
-    int page = sysconf(_SC_PAGESIZE);
+    int page = sysconf(_SC_PAGESIZE); // page 大小
     size_t rss;
     char buf[4096];
     char filename[256];

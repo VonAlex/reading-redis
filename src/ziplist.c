@@ -21,18 +21,25 @@
  * the ziplist occupies, including the four bytes of the zlbytes field itself.
  * This value needs to be stored to be able to resize the entire structure
  * without the need to traverse it first.
+ * zlbytes 表示 ziplist 占用的总字节数，保存这个值是为了避免在需要 resize ziplist 时做遍历
+ * 
  *
  * <uint32_t zltail> is the offset to the last entry in the list. This allows
  * a pop operation on the far side of the list without the need for full
  * traversal.
+ * zltail 表示最后一个 entry 的偏移量。
+ * 这就允许我们在不对整个 ziplist 遍历的情况下在 list 的尾部做 pop 操作。
  *
  * <uint16_t zllen> is the number of entries. When there are more than
  * 2^16-2 entries, this value is set to 2^16-1 and we need to traverse the
  * entire list to know how many items it holds.
+ * zllen 表示 entry 的数量。
+ * 当有超过 2^16-2 个 entry 时，该值被设置成 2^16-1，需要遍历 entry 列表才能知道它持有多少 item。
  *
  * <uint8_t zlend> is a special entry representing the end of the ziplist.
  * Is encoded as a single byte equal to 255. No other normal entry starts
  * with a byte set to the value of 255.
+ * zlend 是 ziplist 结束的标识符，固定值为 255.
  *
  * ZIPLIST ENTRIES
  * ===============
@@ -42,9 +49,11 @@
  * able to traverse the list from back to front. Second, the entry encoding is
  * provided. It represents the entry type, integer or string, and in the case
  * of strings it also represents the length of the string payload.
+ * ziplist 中每个 entry 以 meta 为前缀，meta 包含两部分信息。
+ * 
  * So a complete entry is stored like this:
  *
- * <prevlen> <encoding> <entry-data>
+ * <prevlen> <encoding> <entry-data> // 保存 prevlen 是为了倒序遍历
  *
  * Sometimes the encoding represents the entry itself, like for small integers
  * as we'll see later. In such a case the <entry-data> part is missing, and we
@@ -54,10 +63,10 @@
  *
  * The length of the previous entry, <prevlen>, is encoded in the following way:
  * If this length is smaller than 254 bytes, it will only consume a single
- * byte representing the length as an unsinged 8 bit integer. When the length
- * is greater than or equal to 254, it will consume 5 bytes. The first byte is
- * set to 254 (FE) to indicate a larger value is following. The remaining 4
- * bytes take the length of the previous entry as value.
+ * byte representing the length as an unsinged 8 bit integer. 
+ * When the length is greater than or equal to 254, it will consume 5 bytes. 
+ * The first byte is set to 254 (FE) to indicate a larger value is following. // 首字节 254 表示后面会有更大的 value
+ * The remaining 4 bytes take the length of the previous entry as value.
  *
  * So practically an entry is encoded in the following way:
  *
@@ -68,14 +77,20 @@
  *
  * 0xFE <4 bytes unsigned little endian prevlen> <encoding> <entry>
  *
- * The encoding field of the entry depends on the content of the
- * entry. When the entry is a string, the first 2 bits of the encoding first
+ * The encoding field of the entry depends on the content of the entry. // encoding 部分的值取决于 entry 的内容
+ * When the entry is a string, the first 2 bits of the encoding first
  * byte will hold the type of encoding used to store the length of the string,
- * followed by the actual length of the string. When the entry is an integer
- * the first 2 bits are both set to 1. The following 2 bits are used to specify
- * what kind of integer will be stored after this header. An overview of the
- * different types and encodings is as follows. The first byte is always enough
- * to determine the kind of entry.
+ * followed by the actual length of the string. 
+ * 如果 entry 是 string，encoding 的前 2 个 bit 将保存 string 长度的 encoding 类型，
+ * 紧接着就是 string 的真实长度。
+ * 
+ * When the entry is an integer the first 2 bits are both set to 1. 
+ * The following 2 bits are used to specify what kind of integer will be stored after this header. 
+ * 如果 entry 是 integer，前两个 bit 全都置为 1。
+ * 接下来 2 bit 用来指定该 header 要存储的 integer 类型。
+ * 
+ * An overview of the different types and encodings is as follows. 
+ * The first byte is always enough to determine the kind of entry. // 首字节足够判断 entry 类型
  *
  * |00pppppp| - 1 byte
  *      String value with length less than or equal to 63 bytes (6 bits).

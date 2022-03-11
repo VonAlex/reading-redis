@@ -1745,8 +1745,8 @@ void databasesCron(void) {
 
 /* We take a cached value of the unix time in the global state because with
  * virtual memory and aging there is to store the current time in objects at
- * every object access, and accuracy is not needed. To access a global var is
- * a lot faster than calling time(NULL).
+ * every object access, and accuracy is not needed. 
+ * To access a global var is a lot faster than calling time(NULL).
  *
  * This function should be fast because it is called at every command execution
  * in call(), so it is possible to decide if to update the daylight saving
@@ -1783,10 +1783,11 @@ void checkChildrenDone(void) {
     if (server.rdb_child_pid != -1 && server.rdb_pipe_conns)
         return;
 
-    if ((pid = wait3(&statloc,WNOHANG,NULL)) != 0) {
+    if ((pid = wait3(&statloc,WNOHANG,NULL)) != 0) { // WNOHANG 如果没有任何已经结束了的子进程，则马上返回，不等待
         int exitcode = WEXITSTATUS(statloc);
         int bysignal = 0;
 
+        // 异常终止，获得终止 signal
         if (WIFSIGNALED(statloc)) bysignal = WTERMSIG(statloc);
 
         /* sigKillChildHandler catches the signal and calls exit(), but we
@@ -2357,7 +2358,7 @@ void initServerConfig(void) {
     server.tlsfd_count = 0;
     server.sofd = -1;
     server.active_expire_enabled = 1;
-    server.client_max_querybuf_len = PROTO_MAX_QUERYBUF_LEN;
+    server.client_max_querybuf_len = PROTO_MAX_QUERYBUF_LEN; // 1G limit
     server.saveparams = NULL;
     server.loading = 0;
     server.logfile = zstrdup(CONFIG_DEFAULT_LOGFILE);
@@ -2814,7 +2815,7 @@ void resetServerStats(void) {
  * Needed for pthread_cancel used by the fast memory test used by the crash report. */
 void makeThreadKillable(void) {
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL); // 线程接收到 Cancel 信号后立即结束执行
 }
 
 void initServer(void) {
@@ -3106,6 +3107,7 @@ int populateCommandTableParseFlags(struct redisCommand *c, char *strflags) {
 
 /* Populates the Redis Command Table starting from the hard coded list
  * we have on top of server.c file. */
+// 填充 Redis Command Table
 void populateCommandTable(void) {
     int j;
     int numcommands = sizeof(redisCommandTable)/sizeof(struct redisCommand);
@@ -3422,7 +3424,9 @@ void call(client *c, int flags) {
 
         /* Call propagate() only if at least one of AOF / replication
          * propagation is needed. Note that modules commands handle replication
-         * in an explicit way, so we never replicate them automatically. */
+         * in an explicit way, so we never replicate them automatically.
+         * 不自动同步 moudule 命令
+         */
         if (propagate_flags != PROPAGATE_NONE && !(c->cmd->flags & CMD_MODULE))
             propagate(c->cmd,c->db->id,c->argv,c->argc,propagate_flags);
     }
@@ -4926,7 +4930,7 @@ static void sigKillChildHandler(int sig) {
     UNUSED(sig);
     int level = server.in_fork_child == CHILD_TYPE_MODULE? LL_VERBOSE: LL_WARNING;
     serverLogFromHandler(level, "Received SIGUSR1 in child, exiting now.");
-    exitFromChild(SERVER_CHILD_NOERROR_RETVAL);
+    exitFromChild(SERVER_CHILD_NOERROR_RETVAL); // 以 SERVER_CHILD_NOERROR_RETVAL code 离开
 }
 
 void setupChildSignalHandlers(void) {
@@ -5172,11 +5176,13 @@ int main(int argc, char **argv) {
     zmalloc_set_oom_handler(redisOutOfMemoryHandler);
     srand(time(NULL)^getpid());
     gettimeofday(&tv,NULL);
+
     crc64_init();
 
     uint8_t hashseed[16];
     getRandomBytes(hashseed,sizeof(hashseed));
     dictSetHashFunctionSeed(hashseed);
+
     server.sentinel_mode = checkForSentinelMode(argc,argv);
     initServerConfig();
     ACLInit(); /* The ACL subsystem must be initialized ASAP because the

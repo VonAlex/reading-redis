@@ -608,7 +608,7 @@ void feedAppendOnlyFile(struct redisCommand *cmd, int dictid, robj **argv, int a
         buf = catAppendOnlyGenericCommand(buf,3,tmpargv);
         decrRefCount(tmpargv[0]);
         buf = catAppendOnlyExpireAtCommand(buf,cmd,argv[1],argv[2]);
-    } else if (cmd->proc == setCommand && argc > 3) {
+    } else if (cmd->proc == setCommand && argc > 3) { // set key value ex | px ..
         int i;
         robj *exarg = NULL, *pxarg = NULL;
         for (i = 3; i < argc; i ++) {

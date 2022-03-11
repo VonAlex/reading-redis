@@ -293,9 +293,8 @@ void evictionPoolPopulate(int dbid, dict *sampledict, dict *keydict, struct evic
  * it is just decremented by one.
  * --------------------------------------------------------------------------*/
 
-/* Return the current time in minutes, just taking the least significant
- * 16 bits. The returned time is suitable to be stored as LDT (last decrement
- * time) for the LFU implementation. */
+/* Return the current time in minutes, just taking the least significant 16 bits. 
+ * The returned time is suitable to be stored as LDT (last decrement time) for the LFU implementation. */
 unsigned long LFUGetTimeInMinutes(void) {
     return (server.unixtime/60) & 65535;
 }

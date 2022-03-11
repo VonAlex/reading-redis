@@ -195,24 +195,24 @@ int rdbLoadLenByRef(rio *rdb, int *isencoded, uint64_t *lenptr) {
 
     if (isencoded) *isencoded = 0;
     if (rioRead(rdb,buf,1) == 0) return -1;
-    type = (buf[0]&0xC0)>>6;
-    if (type == RDB_ENCVAL) {
+    type = (buf[0]&0xC0)>>6; // 11|000000 -> 11
+    if (type == RDB_ENCVAL) { // 11|000000，压缩字符串
         /* Read a 6 bit encoding type. */
         if (isencoded) *isencoded = 1;
-        *lenptr = buf[0]&0x3F;
-    } else if (type == RDB_6BITLEN) {
+        *lenptr = buf[0]&0x3F;// & 0011 1111 接着读取后 6 位
+    } else if (type == RDB_6BITLEN) { // 00|000000
         /* Read a 6 bit len. */
         *lenptr = buf[0]&0x3F;
-    } else if (type == RDB_14BITLEN) {
+    } else if (type == RDB_14BITLEN) { // 01|000001
         /* Read a 14 bit len. */
         if (rioRead(rdb,buf+1,1) == 0) return -1;
         *lenptr = ((buf[0]&0x3F)<<8)|buf[1];
-    } else if (buf[0] == RDB_32BITLEN) {
+    } else if (buf[0] == RDB_32BITLEN) { // 10|000000
         /* Read a 32 bit len. */
         uint32_t len;
         if (rioRead(rdb,&len,4) == 0) return -1;
         *lenptr = ntohl(len);
-    } else if (buf[0] == RDB_64BITLEN) {
+    } else if (buf[0] == RDB_64BITLEN) { // 10|000001
         /* Read a 64 bit len. */
         uint64_t len;
         if (rioRead(rdb,&len,8) == 0) return -1;
@@ -494,7 +494,7 @@ void *rdbGenericLoadStringObject(rio *rdb, int flags, size_t *lenptr) {
     unsigned long long len;
 
     len = rdbLoadLen(rdb,&isencoded);
-    if (isencoded) {
+    if (isencoded) { // 经过编码了，需要继续解析
         switch(len) {
         case RDB_ENC_INT8:
         case RDB_ENC_INT16:
@@ -2168,6 +2168,8 @@ int rdbLoadRio(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
             if ((qword = rdbLoadLen(rdb,NULL)) == RDB_LENERR) goto eoferr;
             lru_idle = qword;
             continue; /* Read next opcode. */
+
+        // 读到 rdb 文件结尾了
         } else if (type == RDB_OPCODE_EOF) {
             /* EOF: End of file, exit the main loop. */
             break;
@@ -2316,11 +2318,15 @@ int rdbLoadRio(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
             goto eoferr;
         }
 
-        /* Check if the key already expired. This function is used when loading
-         * an RDB file from disk, either at startup, or when an RDB was
-         * received from the master. In the latter case, the master is
-         * responsible for key expiry. If we would expire keys here, the
-         * snapshot taken by the master may not be reflected on the slave.
+        /* Check if the key already expired. 
+         * 
+         * 遇到解析 rdb 场景，都会使用该函数
+         * This function is used when loading an RDB file from disk, either at startup, 
+         * or when an RDB was received from the master. 
+         * 
+         * In the latter case, the master is responsible for key expiry. 
+         * 
+         * If we would expire keys here, the snapshot taken by the master may not be reflected on the slave.
          * Similarly if the RDB is the preamble of an AOF file, we want to
          * load all the keys as they are, since the log of operations later
          * assume to work in an exact keyspace state. */
@@ -2344,6 +2350,7 @@ int rdbLoadRio(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
                     dbSyncDelete(db,&keyobj);
                     dbAddRDBLoad(db,key,val);
                 } else {
+                    // key 重复了
                     serverLog(LL_WARNING,
                         "RDB has duplicated key '%s' in DB %d",key,db->id);
                     serverPanic("Duplicated key found in RDB file");
@@ -2534,6 +2541,8 @@ int rdbSaveToSlavesSockets(rdbSaveInfo *rsi) {
         client *slave = ln->value;
         if (slave->replstate == SLAVE_STATE_WAIT_BGSAVE_START) {
             server.rdb_pipe_conns[server.rdb_pipe_numconns++] = slave->conn;
+            // offset 取 server.master_repl_offset
+            // 从此处累计增量数据
             replicationSetupSlaveForFullResync(slave,getPsyncInitialOffset());
         }
     }
@@ -2548,14 +2557,16 @@ int rdbSaveToSlavesSockets(rdbSaveInfo *rsi) {
         rioInitWithFd(&rdb,server.rdb_pipe_write);
 
         redisSetProcTitle("redis-rdb-to-slaves");
+
+        // 绑核操作
         redisSetCpuAffinity(server.bgsave_cpulist);
 
-        retval = rdbSaveRioWithEOFMark(&rdb,NULL,rsi);
+        retval = rdbSaveRioWithEOFMark(&rdb,NULL,rsi); // rdb 写到 server.rdb_pipe_write
         if (retval == C_OK && rioFlush(&rdb) == 0)
             retval = C_ERR;
 
         if (retval == C_OK) {
-            sendChildCOWInfo(CHILD_TYPE_RDB, "RDB");
+            sendChildCOWInfo(CHILD_TYPE_RDB, "RDB"); // 发完 rdb 以后，告知 parent 一些信息
         }
 
         rioFreeFd(&rdb);
@@ -2574,7 +2585,7 @@ int rdbSaveToSlavesSockets(rdbSaveInfo *rsi) {
             while((ln = listNext(&li))) {
                 client *slave = ln->value;
                 if (slave->replstate == SLAVE_STATE_WAIT_BGSAVE_END) {
-                    slave->replstate = SLAVE_STATE_WAIT_BGSAVE_START;
+                    slave->replstate = SLAVE_STATE_WAIT_BGSAVE_START; // 重新做
                 }
             }
             close(server.rdb_pipe_write);
@@ -2591,6 +2602,8 @@ int rdbSaveToSlavesSockets(rdbSaveInfo *rsi) {
             server.rdb_child_pid = childpid;
             server.rdb_child_type = RDB_CHILD_TYPE_SOCKET;
             close(server.rdb_pipe_write); /* close write in parent so that it can detect the close on the child. */
+
+            // 读取 child 进程产生的 rbd 数据，并发送给 replica
             if (aeCreateFileEvent(server.el, server.rdb_pipe_read, AE_READABLE, rdbPipeReadHandler,NULL) == AE_ERR) {
                 serverPanic("Unrecoverable error creating server.rdb_pipe_read file event.");
             }
@@ -2651,32 +2664,55 @@ void bgsaveCommand(client *c) {
     }
 }
 
-/* Populate the rdbSaveInfo structure used to persist the replication
- * information inside the RDB file. Currently the structure explicitly
- * contains just the currently selected DB from the master stream, however
- * if the rdbSave*() family functions receive a NULL rsi structure also
- * the Replication ID/offset is not saved. The function popultes 'rsi'
- * that is normally stack-allocated in the caller, returns the populated
- * pointer if the instance has a valid master client, otherwise NULL
- * is returned, and the RDB saving will not persist any replication related
- * information. */
+/* Populate the rdbSaveInfo structure used to persist the replication information inside the RDB file.
+ * 填充 rdbSaveInfo 结构，用来持久化 RDB 文件里的复制信息。
+ * 
+ * Currently the structure explicitly contains just the currently selected DB from the master stream, 
+ * 目前，该 structure 只是明确包含从 master stream 中选择的 DB，
+ * 
+ * however if the rdbSave*() family functions receive a NULL rsi structure also the Replication ID/offset is not saved. 
+ * 然而，如果 rdbSave*() 函数族收到一个 NULL rsi structure，Replication ID/offset 也是不会保存的
+ * 
+ * The function popultes 'rsi' that is normally stack-allocated in the caller, 
+ * 该函数填充的 'rsi' 通常在 caller 的堆栈中分配。
+ * 
+ * returns the populated pointer if the instance has a valid master client, otherwise NULL is returned,
+ * 如果该实例有一个正常的 master client，那么就会返回一个填充好的指针，否则返回 NULL
+ * 
+ * and the RDB saving will not persist any replication related information. 
+ * 并且，RDB saving 将不会持久化任何 replication 相关的信息。
+ * */
 rdbSaveInfo *rdbPopulateSaveInfo(rdbSaveInfo *rsi) {
     rdbSaveInfo rsi_init = RDB_SAVE_INFO_INIT;
     *rsi = rsi_init;
 
-    /* If the instance is a master, we can populate the replication info
-     * only when repl_backlog is not NULL. If the repl_backlog is NULL,
-     * it means that the instance isn't in any replication chains. In this
-     * scenario the replication info is useless, because when a slave
-     * connects to us, the NULL repl_backlog will trigger a full
-     * synchronization, at the same time we will use a new replid and clear
-     * replid2. */
+    /* If the instance is a master, we can populate the replication info only when repl_backlog is not NULL. 
+     * 如果我是 master，只有在 repl_backlog 不是 NULL 的时候才填充 replication 信息。
+     *
+     * If the repl_backlog is NULL, it means that the instance isn't in any replication chains. 
+     * 如果 repl_backlog 是 NULL，那意味着为不在任何 replication 链条里。
+     * 
+     * In this scenario the replication info is useless, 
+     * 在这种场景下，replication 信息是毫无用处的，
+     * 
+     * because when a slave connects to us, the NULL repl_backlog will trigger a full synchronization, 
+     * 因为当一个 slave 连上来以后，NULL repl_backlog 将会触发一次全同步。
+     * 
+     * at the same time we will use a new replid and clear replid2. 
+     * 同时，我们会使用一个新的 replid，并清空 replid2。
+     * */
     if (!server.masterhost && server.repl_backlog) {
         /* Note that when server.slaveseldb is -1, it means that this master
          * didn't apply any write commands after a full synchronization.
          * So we can let repl_stream_db be 0, this allows a restarted slave
          * to reload replication ID/offset, it's safe because the next write
-         * command must generate a SELECT statement. */
+         * command must generate a SELECT statement. 
+         * 
+         * 注意，当 server.slaveseldb = -1 时，
+         * 意味着该 master 在 full synchronization 后不会接受任何 write。
+         * 因此，将 repl_stream_db 置为 0，这将允许一个重新启动的 slave 加载 replication ID/offset，
+         * 这是安全的，因为下一次 write，必须产生一条 SELECT 语句。
+         * */
         rsi->repl_stream_db = server.slaveseldb == -1 ? 0 : server.slaveseldb;
         return rsi;
     }
@@ -2692,7 +2728,11 @@ rdbSaveInfo *rdbPopulateSaveInfo(rdbSaveInfo *rsi) {
      * replication selected DB info inside the RDB file: the slave can
      * increment the master_repl_offset only from data arriving from the
      * master, so if we are disconnected the offset in the cached master
-     * is valid. */
+     * is valid. 
+     * 
+     * slave 只能通过从 master 接收到的数据增加 master_repl_offset，
+     * 因此，如果我们断开连接，cached master 的 offset 是合理的。
+     */
     if (server.cached_master) {
         rsi->repl_stream_db = server.cached_master->db->id;
         return rsi;
