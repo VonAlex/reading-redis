@@ -1375,8 +1375,9 @@ typedef struct {
     sds           file_name;  /* file name */
     long long     file_seq;   /* file sequence */
     aof_file_type file_type;  /* file type */
-} aofInfo;
+} aofInfo; // 每个 aof 文件的信息
 
+// 一个 base，多个 incr
 typedef struct {
     aofInfo     *base_aof_info;       /* BASE file information. NULL if there is no BASE file. */
     list        *incr_aof_list;       /* INCR AOFs list. We may have multiple INCR AOF when rewrite fails. */
@@ -1638,7 +1639,7 @@ struct redisServer {
     int aof_use_rdb_preamble;       /* Use RDB preamble on AOF rewrites. */
     redisAtomic int aof_bio_fsync_status; /* Status of AOF fsync in bio job. */
     redisAtomic int aof_bio_fsync_errno;  /* Errno of AOF fsync in bio job. */
-    aofManifest *aof_manifest;       /* Used to track AOFs. */
+    aofManifest *aof_manifest;       /* Used to track AOFs. 在 server 启动时会创建 */
     int aof_disable_auto_gc;         /* If disable automatically deleting HISTORY type AOFs?
                                         default no. (for testings). */
 

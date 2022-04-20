@@ -295,7 +295,8 @@ void aofLoadManifestFromDisk(void) {
             err = "The AOF manifest file is invalid format";
             goto loaderr;
         }
-
+        // manifest 文件格式：
+        // file <filename> seq <seq> type <type>
         argv = sdssplitargs(line, &argc);
         /* 'argc < 6' was done for forward compatibility. */
         if (argv == NULL || argc < 6 || (argc % 2)) {
@@ -338,7 +339,7 @@ void aofLoadManifestFromDisk(void) {
         } else if (ai->file_type == AOF_FILE_TYPE_HIST) {
             listAddNodeTail(server.aof_manifest->history_aof_list, ai);
         } else if (ai->file_type == AOF_FILE_TYPE_INCR) {
-            if (ai->file_seq <= maxseq) {
+            if (ai->file_seq <= maxseq) { // incr aof 文件的 file_seq 应该是递增的
                 err = "Found a non-monotonic sequence number";
                 goto loaderr;
             }
@@ -418,16 +419,17 @@ void aofManifestFreeAndUpdate(aofManifest *am) {
  */
 sds getNewBaseFileNameAndMarkPreAsHistory(aofManifest *am) {
     serverAssert(am != NULL);
-    if (am->base_aof_info) {
+    if (am->base_aof_info) { // 老的 base aof 文件放到
         serverAssert(am->base_aof_info->file_type == AOF_FILE_TYPE_BASE);
         am->base_aof_info->file_type = AOF_FILE_TYPE_HIST;
         listAddNodeHead(am->history_aof_list, am->base_aof_info);
     }
 
+    // 如果使用混合模式，文件后缀名 .rdb，否则使用 .aof
     char *format_suffix = server.aof_use_rdb_preamble ?
         RDB_FORMAT_SUFFIX:AOF_FORMAT_SUFFIX;
 
-    aofInfo *ai = aofInfoCreate();
+    aofInfo *ai = aofInfoCreate(); // 重新一个新的 aofInfo，存放新的 base aof 信息
     ai->file_name = sdscatprintf(sdsempty(), "%s.%lld%s%s", server.aof_filename,
                         ++am->curr_base_file_seq, BASE_FILE_SUFFIX, format_suffix);
     ai->file_seq = am->curr_base_file_seq;
@@ -449,7 +451,7 @@ sds getNewIncrAofName(aofManifest *am) {
     ai->file_type = AOF_FILE_TYPE_INCR;
     ai->file_name = sdscatprintf(sdsempty(), "%s.%lld%s%s", server.aof_filename,
                         ++am->curr_incr_file_seq, INCR_FILE_SUFFIX, AOF_FORMAT_SUFFIX);
-    ai->file_seq = am->curr_incr_file_seq;
+    ai->file_seq = am->curr_incr_file_seq; // ++ 切一个新的文件
     listAddNodeTail(am->incr_aof_list, ai);
     am->dirty = 1;
     return ai->file_name;
@@ -664,6 +666,7 @@ int aofDelHistoryFiles(void) {
     }
 
     server.aof_manifest->dirty = 1;
+    // 因为没有了 history aof，因此要重写 manifest
     return persistAofManifest(server.aof_manifest);
 }
 
@@ -748,6 +751,7 @@ int openNewIncrAofForAppend(void) {
     if (server.aof_state == AOF_OFF) return C_OK;
 
     /* Dup a temp aof_manifest to modify. */
+    // 从 server.aof_manifest 拷贝出一个临时的 manifest 进行修改
     aofManifest *temp_am = aofManifestDup(server.aof_manifest);
 
     /* Open new AOF. */
@@ -1214,6 +1218,8 @@ sds catAppendOnlyGenericCommand(sds dst, int argc, robj **argv) {
  *
  * Timestamp annotation format is "#TS:${timestamp}\r\n". "TS" is short of
  * timestamp and this method could save extra bytes in AOF. */
+
+// 在 aof rewrite 时总是要使用新生成的时间，否则可以根据需要使用 server.unixtime
 sds genAofTimestampAnnotationIfNeeded(int force) {
     sds ts = NULL;
 
@@ -1228,11 +1234,11 @@ sds genAofTimestampAnnotationIfNeeded(int force) {
 void feedAppendOnlyFile(int dictid, robj **argv, int argc) {
     sds buf = sdsempty();
 
-    serverAssert(dictid >= 0 && dictid < server.dbnum);
+    serverAssert(dictid >= 0 && dictid < server.dbnum); // 合理的 dbid
 
     /* Feed timestamp if needed */
     if (server.aof_timestamp_enabled) {
-        sds ts = genAofTimestampAnnotationIfNeeded(0);
+        sds ts = genAofTimestampAnnotationIfNeeded(0); // 使用 aof 时间戳功能
         if (ts != NULL) {
             buf = sdscatsds(buf, ts);
             sdsfree(ts);
@@ -1257,6 +1263,7 @@ void feedAppendOnlyFile(int dictid, robj **argv, int argc) {
     /* Append to the AOF buffer. This will be flushed on disk just before
      * of re-entering the event loop, so before the client will get a
      * positive reply about the operation performed. */
+    // 如果 aof 功能开启了，或当前有在做 aofrw 的子进程
     if (server.aof_state == AOF_ON ||
         server.child_type == CHILD_TYPE_AOF)
     {
@@ -1555,7 +1562,7 @@ int loadAppendOnlyFiles(aofManifest *am) {
      *    has only one base AOF record, and the file name of this base AOF is 'server.aof_filename',
      *    and the 'server.aof_filename' file not exist in 'server.aof_dirname' directory
      * */
-    if (fileExist(server.aof_filename)) {
+    if (fileExist(server.aof_filename)) { // 从老版本 aof 重启
         if (!dirExists(server.aof_dirname) ||
             (am->base_aof_info == NULL && listLength(am->incr_aof_list) == 0) ||
             (am->base_aof_info != NULL && listLength(am->incr_aof_list) == 0 &&
@@ -1574,6 +1581,7 @@ int loadAppendOnlyFiles(aofManifest *am) {
 
     /* Here we calculate the total size of all BASE and INCR files in
      * advance, it will be set to `server.loading_total_bytes`. */
+    // total_size = base 大小 + incr 大小
     total_size = getBaseAndIncrAppendOnlyFilesSize(am);
     startLoading(total_size, RDBFLAGS_AOF_PREAMBLE, 0);
 
@@ -2140,7 +2148,7 @@ int rewriteAppendOnlyFileRio(rio *aof) {
 
     /* Record timestamp at the beginning of rewriting AOF. */
     if (server.aof_timestamp_enabled) {
-        sds ts = genAofTimestampAnnotationIfNeeded(1);
+        sds ts = genAofTimestampAnnotationIfNeeded(1); // force
         if (rioWrite(aof,ts,sdslen(ts)) == 0) { sdsfree(ts); goto werr; }
         sdsfree(ts);
     }
@@ -2338,7 +2346,7 @@ int rewriteAppendOnlyFileBackground(void) {
 
         /* Child */
         redisSetProcTitle("redis-aof-rewrite");
-        redisSetCpuAffinity(server.aof_rewrite_cpulist);
+        redisSetCpuAffinity(server.aof_rewrite_cpulist); // 设置 aofrw 子进程的 cpu 亲和性
         snprintf(tmpfile,256,"temp-rewriteaof-bg-%d.aof", (int) getpid());
         if (rewriteAppendOnlyFile(tmpfile) == C_OK) {
             sendChildCowInfo(CHILD_INFO_TYPE_AOF_COW_SIZE, "AOF rewrite");
@@ -2480,9 +2488,12 @@ void backgroundRewriteDoneHandler(int exitcode, int bysignal) {
 
         /* Change the AOF file type in 'incr_aof_list' from AOF_FILE_TYPE_INCR
          * to AOF_FILE_TYPE_HIST, and move them to the 'history_aof_list'. */
+        // 所有在 incr_aof_list 中的文件都标记成 AOF_FILE_TYPE_HIST，
+        // 并移动到 history_aof_list 里。
         markRewrittenIncrAofAsHistory(temp_am);
 
         /* Persist our modifications. */
+        // 重写 aof manifest
         if (persistAofManifest(temp_am) == C_ERR) {
             bg_unlink(new_base_filepath);
             aofManifestFree(temp_am);

@@ -481,8 +481,9 @@ void evalGenericCommand(client *c, int evalsha) {
     lua_getglobal(lua, "__redis__err__handler");
 
     /* Try to lookup the Lua function */
+    // 在lua 中查找是否注册了此函数
     lua_getglobal(lua, funcname);
-    if (lua_isnil(lua,-1)) {
+    if (lua_isnil(lua,-1)) { // funcname 在lua 中不存在
         lua_pop(lua,1); /* remove the nil from the stack */
         /* Function not defined... let's define it if we have the
          * body of the function. If this is an EVALSHA call we can just

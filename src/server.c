@@ -1182,7 +1182,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
      * a BGSAVE was in progress. */
     if (!hasActiveChildProcess() &&
         server.aof_rewrite_scheduled &&
-        !aofRewriteLimited())
+        !aofRewriteLimited()) // aofRewriteLimited aofrw 是否被限流了
     {
         rewriteAppendOnlyFileBackground();
     }
@@ -6744,7 +6744,7 @@ int main(int argc, char **argv) {
         moduleLoadFromQueue();
         ACLLoadUsersAtStartup();
         InitServerLast();
-        aofLoadManifestFromDisk();
+        aofLoadManifestFromDisk(); // 加载 aof manifest 文件
         loadDataFromDisk();
         aofOpenIfNeededOnServerStart();
         aofDelHistoryFiles();
