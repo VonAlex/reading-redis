@@ -729,6 +729,8 @@ int64_t commandFlagsFromString(char *s) {
  *                     keys, programmatically creates key names, or any
  *                     other reason.
  */
+
+// RedisModule_CreateCommand 创建新的命令
 int RM_CreateCommand(RedisModuleCtx *ctx, const char *name, RedisModuleCmdFunc cmdfunc, const char *strflags, int firstkey, int lastkey, int keystep) {
     int64_t flags = strflags ? commandFlagsFromString((char*)strflags) : 0;
     if (flags == -1) return REDISMODULE_ERR;
@@ -2868,6 +2870,7 @@ fmterr:
  *
  * This API is documented here: https://redis.io/topics/modules-intro
  */
+// 类似于 lua call
 RedisModuleCallReply *RM_Call(RedisModuleCtx *ctx, const char *cmdname, const char *fmt, ...) {
     struct redisCommand *cmd;
     client *c = NULL;
@@ -5214,6 +5217,7 @@ dictType moduleAPIDictType = {
     NULL                       /* val destructor */
 };
 
+// RedisModule_* -> RM_*
 int moduleRegisterApi(const char *funcname, void *funcptr) {
     return dictAdd(server.moduleapi, (char*)funcname, funcptr);
 }
@@ -5237,7 +5241,7 @@ void moduleInitModulesSystem(void) {
     /* Set up filter list */
     moduleCommandFilters = listCreate();
 
-    moduleRegisterCoreAPI();
+    moduleRegisterCoreAPI(); // 注册 module 核心 api
     if (pipe(server.module_blocked_pipe) == -1) {
         serverLog(LL_WARNING,
             "Can't create the pipe for module blocking commands: %s",
@@ -5320,7 +5324,7 @@ int moduleLoad(const char *path, void **module_argv, int module_argc) {
     void *handle;
     RedisModuleCtx ctx = REDISMODULE_CTX_INIT;
 
-    handle = dlopen(path,RTLD_NOW|RTLD_LOCAL);
+    handle = dlopen(path,RTLD_NOW|RTLD_LOCAL); // 加载动态库
     if (handle == NULL) {
         serverLog(LL_WARNING, "Module %s failed to load: %s", path, dlerror());
         return C_ERR;
@@ -5333,6 +5337,7 @@ int moduleLoad(const char *path, void **module_argv, int module_argc) {
             "symbol. Module not loaded.",path);
         return C_ERR;
     }
+    // 执行 RedisModule_OnLoad 函数
     if (onload((void*)&ctx,module_argv,module_argc) == REDISMODULE_ERR) {
         if (ctx.module) {
             moduleUnregisterCommands(ctx.module);

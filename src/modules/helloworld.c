@@ -119,7 +119,7 @@ int HelloListSumLen_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, 
     size_t items = RedisModule_CallReplyLength(reply);
     size_t j;
     for (j = 0; j < items; j++) {
-        RedisModuleCallReply *ele = RedisModule_CallReplyArrayElement(reply,j);
+        RedisModuleCallReply *ele = RedisModule_CallReplyArrayElement(reply,j); // reply 数组第 j 个元素
         strlen += RedisModule_CallReplyLength(ele);
     }
     RedisModule_FreeCallReply(reply);
@@ -253,11 +253,13 @@ int HelloRepl1_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int a
      * ECHO c foo
      * EXEC
      */
+    // RedisModule_Replicate 命令在 EXEC 之前
     RedisModule_Replicate(ctx,"ECHO","c","foo");
 
     /* Using the "!" modifier we replicate the command if it
      * modified the dataset in some way. */
-    RedisModule_Call(ctx,"INCR","c!","foo");
+    // c 表示普通 c string
+    RedisModule_Call(ctx,"INCR","c!","foo"); 
     RedisModule_Call(ctx,"INCR","c!","bar");
 
     RedisModule_ReplyWithLongLong(ctx,0);
@@ -278,7 +280,7 @@ int HelloRepl1_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int a
 int HelloRepl2_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     if (argc != 2) return RedisModule_WrongArity(ctx);
 
-    RedisModule_AutoMemory(ctx); /* Use automatic memory management. */
+    RedisModule_AutoMemory(ctx); /* Use automatic memory management. 自动管理内存 */
     RedisModuleKey *key = RedisModule_OpenKey(ctx,argv[1],
         REDISMODULE_READ|REDISMODULE_WRITE);
 
@@ -295,11 +297,11 @@ int HelloRepl2_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int a
         if (RedisModule_StringToLongLong(ele,&val) != REDISMODULE_OK) val = 0;
         val++;
         sum += val;
-        RedisModuleString *newele = RedisModule_CreateStringFromLongLong(ctx,val);
+        RedisModuleString *newele = RedisModule_CreateStringFromLongLong(ctx,val); // 创建一个新 RedisModuleString
         RedisModule_ListPush(key,REDISMODULE_LIST_HEAD,newele);
     }
     RedisModule_ReplyWithLongLong(ctx,sum);
-    RedisModule_ReplicateVerbatim(ctx);
+    RedisModule_ReplicateVerbatim(ctx); // 按照客户端调用的情况去把 key 同步到 slave 和 aof，不放入 muti-exec 中
     return REDISMODULE_OK;
 }
 
@@ -531,6 +533,7 @@ int HelloLeftPad_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int
             "ERR padding must be a single char");
 
     /* Here we use our pool allocator, for our throw-away allocation. */
+    // 使用 pool allocator，随用随丢
     padlen -= strlen;
     char *buf = RedisModule_PoolAlloc(ctx,padlen+strlen);
     for (long long j = 0; j < padlen; j++) buf[j] = *ch;

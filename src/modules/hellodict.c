@@ -48,8 +48,10 @@ static RedisModuleDict *Keyspace;
 int cmd_SET(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     if (argc != 3) return RedisModule_WrongArity(ctx);
     RedisModule_DictSet(Keyspace,argv[1],argv[2]);
+
     /* We need to keep a reference to the value stored at the key, otherwise
      * it would be freed when this callback returns. */
+    // 每次调用这个函数，都会使字符串 str 需要额外调用 RedisModule_FreeString
     RedisModule_RetainString(NULL,argv[2]);
     return RedisModule_ReplyWithSimpleString(ctx, "OK");
 }
@@ -100,6 +102,7 @@ int cmd_KEYRANGE(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     RedisModule_ReplySetArrayLength(ctx,replylen);
 
     /* Cleanup. */
+    // 清理迭代器
     RedisModule_DictIteratorStop(iter);
     return REDISMODULE_OK;
 }
@@ -113,6 +116,7 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
     if (RedisModule_Init(ctx,"hellodict",1,REDISMODULE_APIVER_1)
         == REDISMODULE_ERR) return REDISMODULE_ERR;
 
+    // 把命令以及对应处理函数添加到 server.commands dict 中
     if (RedisModule_CreateCommand(ctx,"hellodict.set",
         cmd_SET,"write deny-oom",1,1,0) == REDISMODULE_ERR)
         return REDISMODULE_ERR;

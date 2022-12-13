@@ -2635,8 +2635,8 @@ void clusterSendModule(clusterLink *link, uint64_t module_id, uint8_t type,
     uint32_t totlen;
 
     clusterBuildMessageHdr(hdr,CLUSTERMSG_TYPE_MODULE);
-    totlen = sizeof(clusterMsg)-sizeof(union clusterMsgData);
-    totlen += sizeof(clusterMsgModule) - 3 + len;
+    totlen = sizeof(clusterMsg)-sizeof(union clusterMsgData); // header
+    totlen += sizeof(clusterMsgModule) - 3 + len; // 3 padding
 
     hdr->data.module.msg.module_id = module_id; /* Already endian adjusted. */
     hdr->data.module.msg.type = type;

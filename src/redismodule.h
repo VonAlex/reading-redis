@@ -386,6 +386,7 @@ int REDISMODULE_API_FUNC(RedisModule_CommandFilterArgDelete)(RedisModuleCommandF
 static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int apiver) __attribute__((unused));
 static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int apiver) {
     void *getapifuncptr = ((void**)ctx)[0];
+    // RM_GetApi 函数是 server.moduleapi dict 取到函数的地址
     RedisModule_GetApi = (int (*)(const char *, void *)) (unsigned long)getapifuncptr;
     REDISMODULE_GET_API(Alloc);
     REDISMODULE_GET_API(Calloc);
@@ -393,7 +394,7 @@ static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int 
     REDISMODULE_GET_API(Realloc);
     REDISMODULE_GET_API(Strdup);
     REDISMODULE_GET_API(CreateCommand);
-    REDISMODULE_GET_API(SetModuleAttribs);
+    REDISMODULE_GET_API(SetModuleAttribs); // 获取 RedisModule_SetModuleAttribs 地址
     REDISMODULE_GET_API(IsModuleNameBusy);
     REDISMODULE_GET_API(WrongArity);
     REDISMODULE_GET_API(ReplyWithLongLong);
@@ -554,6 +555,8 @@ static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int 
 #endif
 
     if (RedisModule_IsModuleNameBusy && RedisModule_IsModuleNameBusy(name)) return REDISMODULE_ERR;
+
+    // RM_SetModuleAttribs
     RedisModule_SetModuleAttribs(ctx,name,ver,apiver);
     return REDISMODULE_OK;
 }
