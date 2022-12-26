@@ -2636,7 +2636,7 @@ void clusterSendModule(clusterLink *link, uint64_t module_id, uint8_t type,
 
     clusterBuildMessageHdr(hdr,CLUSTERMSG_TYPE_MODULE);
     totlen = sizeof(clusterMsg)-sizeof(union clusterMsgData); // header
-    totlen += sizeof(clusterMsgModule) - 3 + len; // 3 padding
+    totlen += sizeof(clusterMsgModule) - 3 + len; // 3 字节的 padding
 
     hdr->data.module.msg.module_id = module_id; /* Already endian adjusted. */
     hdr->data.module.msg.type = type;
@@ -2654,11 +2654,11 @@ void clusterSendModule(clusterLink *link, uint64_t module_id, uint8_t type,
     memcpy(hdr->data.module.msg.bulk_data,payload,len);
 
     if (link)
-        clusterSendMessage(link,heapbuf,totlen);
+        clusterSendMessage(link,heapbuf,totlen); // 发送给特定节点
     else
-        clusterBroadcastMessage(heapbuf,totlen);
+        clusterBroadcastMessage(heapbuf,totlen); // 发送给所有节点（ 广播 ）
 
-    if (heapbuf != buf) zfree(heapbuf);
+    if (heapbuf != buf) zfree(heapbuf); // 有分配过堆内存
 }
 
 /* This function gets a cluster node ID string as target, the same way the nodes
@@ -5531,7 +5531,9 @@ clusterNode *getNodeByQuery(client *c, struct redisCommand *cmd, robj **argv, in
 
     /* Modules can turn off Redis Cluster redirection: this is useful
      * when writing a module that implements a completely different
-     * distributed system. */
+     * distributed system. 
+     * 当使用 module 来实现一个完全不同的分布式系统时，关闭 Redis Cluster 的 redirection 是有意义的
+     * */
 
     /* We handle all the cases as if they were EXEC commands, so we have
      * a common code path for everything */
@@ -5563,9 +5565,10 @@ clusterNode *getNodeByQuery(client *c, struct redisCommand *cmd, robj **argv, in
         margc = ms->commands[i].argc;
         margv = ms->commands[i].argv;
 
+        // 返回 key 列表
         keyindex = getKeysFromCommand(mcmd,margv,margc,&numkeys);
         for (j = 0; j < numkeys; j++) {
-            robj *thiskey = margv[keyindex[j]];
+            robj *thiskey = margv[keyindex[j]]; // 第 i 个 key
             int thisslot = keyHashSlot((char*)thiskey->ptr,
                                        sdslen(thiskey->ptr));
 
@@ -5600,10 +5603,11 @@ clusterNode *getNodeByQuery(client *c, struct redisCommand *cmd, robj **argv, in
                     importing_slot = 1;
                 }
             } else {
+                // 第 2...n 个 key 的处理
                 /* If it is not the first key, make sure it is exactly
                  * the same key as the first we saw. */
                 if (!equalStringObjects(firstkey,thiskey)) {
-                    if (slot != thisslot) {
+                    if (slot != thisslot) { // key slot 不相等
                         /* Error: multiple keys from different slots. */
                         getKeysFreeResult(keyindex);
                         if (error_code)
@@ -5612,27 +5616,27 @@ clusterNode *getNodeByQuery(client *c, struct redisCommand *cmd, robj **argv, in
                     } else {
                         /* Flag this request as one with multiple different
                          * keys. */
-                        multiple_keys = 1;
+                        multiple_keys = 1; // 多 key 标识
                     }
                 }
             }
 
             /* Migarting / Improrting slot? Count keys we don't have. */
             if ((migrating_slot || importing_slot) &&
-                lookupKeyRead(&server.db[0],thiskey) == NULL)
+                lookupKeyRead(&server.db[0],thiskey) == NULL) // 正在迁移 slot，且当前 key 在本地 db 找不到
             {
                 missing_keys++;
             }
         }
-        getKeysFreeResult(keyindex);
+        getKeysFreeResult(keyindex); // free 掉 keyindex
     }
 
     /* No key at all in command? then we can serve the request
      * without redirections or errors in all the cases. */
-    if (n == NULL) return myself;
+    if (n == NULL) return myself; // 没有 key，就不需要 redirections，返回 myself
 
     /* Cluster is globally down but we got keys? We can't serve the request. */
-    if (server.cluster->state != CLUSTER_OK) {
+    if (server.cluster->state != CLUSTER_OK) { // cluster 已经 down 了，但是依然受到了 request，此时应该拒绝服务
         if (error_code) *error_code = CLUSTER_REDIR_DOWN_STATE;
         return NULL;
     }
@@ -5648,7 +5652,7 @@ clusterNode *getNodeByQuery(client *c, struct redisCommand *cmd, robj **argv, in
 
     /* If we don't have all the keys and we are migrating the slot, send
      * an ASK redirection. */
-    if (migrating_slot && missing_keys) {
+    if (migrating_slot && missing_keys) { // slot 正在迁出，但是访问到 key 了，返回 ASK 错误
         if (error_code) *error_code = CLUSTER_REDIR_ASK;
         return server.cluster->migrating_slots_to[slot];
     }
@@ -5682,6 +5686,7 @@ clusterNode *getNodeByQuery(client *c, struct redisCommand *cmd, robj **argv, in
 
     /* Base case: just return the right node. However if this node is not
      * myself, set error_code to MOVED since we need to issue a rediretion. */
+    // 产出 MOVED 错误
     if (n != myself && error_code) *error_code = CLUSTER_REDIR_MOVED;
     return n;
 }

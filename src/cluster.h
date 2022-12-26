@@ -105,7 +105,7 @@ typedef struct clusterLink {
  * system on top of Redis Cluster message bus, using modules. */
 #define CLUSTER_MODULE_FLAG_NONE 0
 #define CLUSTER_MODULE_FLAG_NO_FAILOVER (1<<1)
-#define CLUSTER_MODULE_FLAG_NO_REDIRECTION (1<<2)
+#define CLUSTER_MODULE_FLAG_NO_REDIRECTION (1<<2) /* 不做 slot 重定向，getNodeByQuery 返回 myself */
 
 /* This structure represent elements of node->fail_reports. */
 typedef struct clusterNodeFailReport {

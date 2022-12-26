@@ -213,8 +213,8 @@ typedef struct RedisModuleTypeMethods {
 
 #define REDISMODULE_API_FUNC(x) (*x)
 
-
-void *REDISMODULE_API_FUNC(RedisModule_Alloc)(size_t bytes);
+// 定义 RedisModule_* 函数指针
+void *REDISMODULE_API_FUNC(RedisModule_Alloc)(size_t bytes); // void (*RedisModule_Alloc) (size_t bytes);
 void *REDISMODULE_API_FUNC(RedisModule_Realloc)(void *ptr, size_t bytes);
 void REDISMODULE_API_FUNC(RedisModule_Free)(void *ptr);
 void *REDISMODULE_API_FUNC(RedisModule_Calloc)(size_t nmemb, size_t size);
@@ -385,10 +385,13 @@ int REDISMODULE_API_FUNC(RedisModule_CommandFilterArgDelete)(RedisModuleCommandF
 /* This is included inline inside each Redis module. */
 static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int apiver) __attribute__((unused));
 static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int apiver) {
-    void *getapifuncptr = ((void**)ctx)[0];
-    // RM_GetApi 函数是 server.moduleapi dict 取到函数的地址
+    void *getapifuncptr = ((void**)ctx)[0]; // 获取到 ctx 中的 getapifuncptr 属性，初始化时被赋值为 RM_GetApi
+  
     RedisModule_GetApi = (int (*)(const char *, void *)) (unsigned long)getapifuncptr;
-    REDISMODULE_GET_API(Alloc);
+
+    // 从 server.moduleapi 中根据名字取出函数地址，为 RedisModule_* 函数指针赋值
+    // 每个 module 都需要知道以下函数的地址，以便使用它们
+    REDISMODULE_GET_API(Alloc); // 替换成 RM_GetApi("RedisModule_Alloc", ((void **)&RedisModule_Alloc))，为函数指针 RedisModule_Alloc 赋值
     REDISMODULE_GET_API(Calloc);
     REDISMODULE_GET_API(Free);
     REDISMODULE_GET_API(Realloc);

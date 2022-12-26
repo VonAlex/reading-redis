@@ -1230,7 +1230,10 @@ int *getKeysUsingCommandTable(struct redisCommand *cmd,robj **argv, int argc, in
              * time arity checks, so we need to handle the case where the user
              * passed an invalid number of arguments here. In this case we
              * return no keys and expect the command implementation to report
-             * an arity or syntax error. */
+             * an arity or syntax error.
+             * Modules 命令和没有固定数量（ 负数 arity 参数）参数的标准命令，
+             * 没有 dispatch 阶段的参数检查，因此我们需要在这里处理这种情况（ 用户传递一个非法数量参数 ），
+             * 在这种情况下，我们不返回 keys，并期望该命令的视线来报告一个参数数量或者语法错误。*/
             if (cmd->flags & CMD_MODULE || cmd->arity < 0) {
                 zfree(keys);
                 *numkeys = 0;
@@ -1257,12 +1260,12 @@ int *getKeysUsingCommandTable(struct redisCommand *cmd,robj **argv, int argc, in
  * This function uses the command table if a command-specific helper function
  * is not required, otherwise it calls the command-specific function. */
 int *getKeysFromCommand(struct redisCommand *cmd, robj **argv, int argc, int *numkeys) {
-    if (cmd->flags & CMD_MODULE_GETKEYS) {
+    if (cmd->flags & CMD_MODULE_GETKEYS) { // 使用 module 指定的 getkeys_proc
         return moduleGetCommandKeysViaAPI(cmd,argv,argc,numkeys);
     } else if (!(cmd->flags & CMD_MODULE) && cmd->getkeys_proc) {
-        return cmd->getkeys_proc(cmd,argv,argc,numkeys);
+        return cmd->getkeys_proc(cmd,argv,argc,numkeys); // 使用特殊的 getkeys_proc
     } else {
-        return getKeysUsingCommandTable(cmd,argv,argc,numkeys);
+        return getKeysUsingCommandTable(cmd,argv,argc,numkeys); // 根据参数 firstkey，keystep 去计算
     }
 }
 

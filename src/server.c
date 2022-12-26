@@ -1428,7 +1428,7 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
     /* Before we are going to sleep, let the threads access the dataset by
      * releasing the GIL. Redis main thread will not touch anything at this
      * time. */
-    if (moduleCount()) moduleReleaseGIL();
+    if (moduleCount()) moduleReleaseGIL(); // 如果有 module 的话，释放锁
 }
 
 /* This function is called immadiately after the event loop multiplexing
@@ -1436,7 +1436,7 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
  * the different events callbacks. */
 void afterSleep(struct aeEventLoop *eventLoop) {
     UNUSED(eventLoop);
-    if (moduleCount()) moduleAcquireGIL();
+    if (moduleCount()) moduleAcquireGIL(); // 如果有 module 的话，先获取锁
 }
 
 /* =========================== Server initialization ======================== */
@@ -2475,13 +2475,15 @@ void call(client *c, int flags) {
     dirty = server.dirty;
     updateCachedTime(0);
     start = server.ustime;
-    c->cmd->proc(c);
+    c->cmd->proc(c); // 调用函数处理命令
     duration = ustime()-start;
     dirty = server.dirty-dirty;
     if (dirty < 0) dirty = 0;
 
     /* When EVAL is called loading the AOF we don't want commands called
-     * from Lua to go into the slowlog or to populate statistics. */
+     * from Lua to go into the slowlog or to populate statistics. 
+     * load AOF 时遇到 EVAL，我们不想从 lua 脚本中调用的命令计入 slowlog，或者污染 statistics
+     */
     if (server.loading && c->flags & CLIENT_LUA)
         flags &= ~(CMD_CALL_SLOWLOG | CMD_CALL_STATS);
 
@@ -2538,7 +2540,8 @@ void call(client *c, int flags) {
 
         /* Call propagate() only if at least one of AOF / replication
          * propagation is needed. Note that modules commands handle replication
-         * in an explicit way, so we never replicate them automatically. */
+         * in an explicit way, so we never replicate them automatically.
+         * modules 命令会以明确的方式处理 replication，因此我们从不自动 replicate */
         if (propagate_flags != PROPAGATE_NONE && !(c->cmd->flags & CMD_MODULE))
             propagate(c->cmd,c->db->id,c->argv,c->argc,propagate_flags);
     }
@@ -2583,7 +2586,7 @@ void call(client *c, int flags) {
  * other operations can be performed by the caller. Otherwise
  * if C_ERR is returned the client was destroyed (i.e. after QUIT). */
 int processCommand(client *c) {
-    moduleCallCommandFilters(c);
+    moduleCallCommandFilters(c); // call filter
 
     /* The QUIT command is handled separately. Normal command procs will
      * go through checking for replication and QUIT will cause trouble
@@ -4264,7 +4267,7 @@ int main(int argc, char **argv) {
     dictSetHashFunctionSeed((uint8_t*)hashseed);
     server.sentinel_mode = checkForSentinelMode(argc,argv);
     initServerConfig();
-    moduleInitModulesSystem();
+    moduleInitModulesSystem(); // 加载 module 系统
 
     /* Store the executable path and arguments in a safe place in order
      * to be able to restart the server later. */
