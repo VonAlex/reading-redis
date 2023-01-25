@@ -1465,7 +1465,11 @@ int RM_Replicate(RedisModuleCtx *ctx, const char *cmdname, const char *fmt, ...)
     /* Replicate! When we are in a threaded context, we want to just insert
      * the replicated command ASAP, since it is not clear when the context
      * will stop being used, so accumulating stuff does not make much sense,
-     * nor we could easily use the alsoPropagate() API from threads. */
+     * nor we could easily use the alsoPropagate() API from threads.
+     * 当我们在一个线程 context 里时，我们只是想尽快插入 replicated command，
+     * 因为不清楚什么时候将停止使用 context，因此累计数据没有什么意义，
+     * 我们也不能简单地从 threads 中使用 alsoPropagate() API。
+     */
     if (ctx->flags & REDISMODULE_CTX_THREAD_SAFE) {
         propagate(cmd,ctx->client->db->id,argv,argc,target);
     } else {
@@ -4099,7 +4103,7 @@ int RM_BlockedClientDisconnected(RedisModuleCtx *ctx) {
  * client will be unblocked. Otherwise the thread safe context will be
  * detached by a specific client.
  * 
- * 如果bc 不是NULL，那么该 module 将被绑定到一个 blocked client 上，
+ * 如果 bc 不是 NULL，那么该 module 将被绑定到一个 blocked client 上，
  * 并有可能使用`RedisModule_Reply*'系列函数为 client unblocked 时积累 replay。
  * 否则，线程安全上下文将被一个特定的客户端分离。
  *
@@ -4554,16 +4558,21 @@ void RM_SetClusterFlags(RedisModuleCtx *ctx, uint64_t flags) {
  * every module can register even millions of timers without problems, even if
  * the actual event loop will just have a single timer that is used to awake the
  * module timers subsystem in order to process the next event.
+ * Module 定时器是一个高精度 "green timers" 抽象，每个模块甚至可以注册数以百万计的定时器而没有问题，
+ * 即使实际的事件循环只是有一个单一的定时器，用来唤醒模块定时器子系统，以便处理下一个事件。
  *
  * All the timers are stored into a radix tree, ordered by expire time, when
  * the main Redis event loop timer callback is called, we try to process all
  * the timers already expired one after the other. Then we re-enter the event
  * loop registering a timer that will expire when the next to process module
  * timer will expire.
+ * 所有的定时器保存到一个前缀树中，按照过期时间排序，当 Redis main 事件循环 timer callback 被调用时，
+ * 我们尝试按个处理所有已经过期的定时器。然后，我们重新进入事件循环注册一个定时器，它将在下一个要处理的模块定时器过期时失效。
  *
  * Every time the list of active timers drops to zero, we unregister the
  * main event loop timer, so that there is no overhead when such feature is
  * not used.
+ * 当活跃的定时器列表数量降为 0 时，我们注销掉 main 时间循环定时器，因此当不使用这个特性时，没有任何负担。
  * -------------------------------------------------------------------------- */
 
 static rax *Timers;     /* The radix tree of all the timers sorted by expire. */

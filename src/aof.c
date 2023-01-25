@@ -368,7 +368,7 @@ void flushAppendOnlyFile(int force) {
                  * postponing the flush and return. */
                 server.aof_flush_postponed_start = server.unixtime;
                 return;
-            } else if (server.unixtime - server.aof_flush_postponed_start < 2) {
+            } else if (server.unixtime - server.aof_flush_postponed_start < 2) { // 最多等待 2s
                 /* We were already waiting for fsync to finish, but for less
                  * than two seconds this is still ok. Postpone again. */
                 return;
@@ -405,7 +405,7 @@ void flushAppendOnlyFile(int force) {
     /* We performed the write so reset the postponed flush sentinel to zero. */
     server.aof_flush_postponed_start = 0;
 
-    if (nwritten != (ssize_t)sdslen(server.aof_buf)) {
+    if (nwritten != (ssize_t)sdslen(server.aof_buf)) { // write 的字节数不够
         static time_t last_write_error_log = 0;
         int can_log = 0;
 

@@ -1354,7 +1354,7 @@ int rdbSaveBackground(char *filename, rdbSaveInfo *rsi) {
                     private_dirty/(1024*1024));
             }
 
-            server.child_info_data.cow_size = private_dirty;
+            server.child_info_data.cow_size = private_dirty; // 将 private_dirty 发给主进程来更改相关数据
             sendChildInfo(CHILD_INFO_TYPE_RDB);
         }
         exitFromChild((retval == C_OK) ? 0 : 1);

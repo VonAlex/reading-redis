@@ -136,40 +136,47 @@ zskiplistNode *zslInsert(zskiplist *zsl, double score, sds ele) {
 
     serverAssert(!isnan(score));
     x = zsl->header;
-    for (i = zsl->level-1; i >= 0; i--) {
+
+    // 1) 搜索当前节点插入位置
+    // 从最大层数开始逐一遍历
+    for (i = zsl->level-1; i >= 0; i--) { // 逐层向下
         /* store rank that is crossed to reach the insert position */
-        rank[i] = i == (zsl->level-1) ? 0 : rank[i+1];
-        while (x->level[i].forward &&
-                (x->level[i].forward->score < score ||
-                    (x->level[i].forward->score == score &&
+        rank[i] = i == (zsl->level-1) ? 0 : rank[i+1]; // 从上一层累加
+        while (x->level[i].forward &&                      // 有后继节点
+                (x->level[i].forward->score < score ||     // 下一个节点的 score 小于要找的 score
+                    (x->level[i].forward->score == score && // score 相等，但是 ele 小于要找的 ele
                     sdscmp(x->level[i].forward->ele,ele) < 0)))
         {
-            rank[i] += x->level[i].span;
-            x = x->level[i].forward;
+            rank[i] += x->level[i].span; // 记录到 update[i] 的距离
+            x = x->level[i].forward; // 前进
         }
-        update[i] = x;
+        update[i] = x; // 记录 "搜索路径"  
     }
     /* we assume the element is not already inside, since we allow duplicated
      * scores, reinserting the same element should never happen since the
      * caller of zslInsert() should test in the hash table if the element is
      * already inside or not. */
-    level = zslRandomLevel();
-    if (level > zsl->level) {
+    level = zslRandomLevel(); // 随机层数
+    if (level > zsl->level) { // 2) 如果随机生成的 level 超过了当前最大 level 需要更新跳跃表的信息
         for (i = zsl->level; i < level; i++) {
             rank[i] = 0;
             update[i] = zsl->header;
-            update[i]->level[i].span = zsl->length;
+            update[i]->level[i].span = zsl->length; // 新添加层级的跨度就是元素的总数
         }
-        zsl->level = level;
+        zsl->level = level; // 更新 level
     }
+
+    // 3) 生成插入节点
     x = zslCreateNode(level,score,ele);
-    for (i = 0; i < level; i++) {
+
+    // 4) 重排 forward 指针
+    for (i = 0; i < level; i++) { // 把新节点插入到每一层
         x->level[i].forward = update[i]->level[i].forward;
         update[i]->level[i].forward = x;
 
         /* update span covered by update[i] as x is inserted here */
-        x->level[i].span = update[i]->level[i].span - (rank[0] - rank[i]);
-        update[i]->level[i].span = (rank[0] - rank[i]) + 1;
+        x->level[i].pan = update[i]->level[i].span - (rank[0] - rank[i]);
+        update[i]->level[i].span = (rank[0] - rank[i]) + 1; // 插入 x 后加 1
     }
 
     /* increment span for untouched levels */
@@ -177,6 +184,7 @@ zskiplistNode *zslInsert(zskiplist *zsl, double score, sds ele) {
         update[i]->level[i].span++;
     }
 
+    // 5) 重排 backward 指针并返回
     x->backward = (update[0] == zsl->header) ? NULL : update[0];
     if (x->level[0].forward)
         x->level[0].forward->backward = x;
@@ -1372,14 +1380,14 @@ int zsetAdd(robj *zobj, double score, sds ele, int *flags, double *newscore) {
         zskiplistNode *znode;
         dictEntry *de;
 
-        de = dictFind(zs->dict,ele);
-        if (de != NULL) {
+        de = dictFind(zs->dict,ele); // 从哈希表中查询新增元素
+        if (de != NULL) { // 查询到该元素
             /* NX? Return, same element already exists. */
             if (nx) {
                 *flags |= ZADD_NOP;
                 return 1;
             }
-            curscore = *(double*)dictGetVal(de);
+            curscore = *(double*)dictGetVal(de); // 从哈希表中查询元素的 score
 
             /* Prepare the score for the increment if needed. */
             if (incr) {
@@ -1393,7 +1401,7 @@ int zsetAdd(robj *zobj, double score, sds ele, int *flags, double *newscore) {
 
             /* Remove and re-insert when score changes. */
             if (score != curscore) {
-                znode = zslUpdateScore(zs->zsl,curscore,ele,score);
+                znode = zslUpdateScore(zs->zsl,curscore,ele,score); // 更新 score
                 /* Note that we did not removed the original element from
                  * the hash table representing the sorted set, so we just
                  * update the score. */
@@ -1401,10 +1409,10 @@ int zsetAdd(robj *zobj, double score, sds ele, int *flags, double *newscore) {
                 *flags |= ZADD_UPDATED;
             }
             return 1;
-        } else if (!xx) {
+        } else if (!xx) {  // 如果新元素不存在
             ele = sdsdup(ele);
-            znode = zslInsert(zs->zsl,score,ele);
-            serverAssert(dictAdd(zs->dict,ele,&znode->score) == DICT_OK);
+            znode = zslInsert(zs->zsl,score,ele); // 在跳表中插入新元素
+            serverAssert(dictAdd(zs->dict,ele,&znode->score) == DICT_OK); // 在哈希表中插入新元素
             *flags |= ZADD_ADDED;
             if (newscore) *newscore = score;
             return 1;
@@ -1547,7 +1555,7 @@ void zaddGenericCommand(client *c, int flags) {
 
     /* Parse options. At the end 'scoreidx' is set to the argument position
      * of the score of the first score-element pair. */
-    scoreidx = 2;
+    scoreidx = 2; // 标记 score 的位置
     while(scoreidx < c->argc) {
         char *opt = c->argv[scoreidx]->ptr;
         if (!strcasecmp(opt,"nx")) flags |= ZADD_NX;
@@ -1571,7 +1579,7 @@ void zaddGenericCommand(client *c, int flags) {
         addReply(c,shared.syntaxerr);
         return;
     }
-    elements /= 2; /* Now this holds the number of score-element pairs. */
+    elements /= 2; /* Now this holds the number of score-element pairs. 有多少对 score-element */
 
     /* Check for incompatible options. */
     if (nx && xx) {
@@ -1589,14 +1597,14 @@ void zaddGenericCommand(client *c, int flags) {
     /* Start parsing all the scores, we need to emit any syntax error
      * before executing additions to the sorted set, as the command should
      * either execute fully or nothing at all. */
-    scores = zmalloc(sizeof(double)*elements);
+    scores = zmalloc(sizeof(double)*elements); // 保存所有 score
     for (j = 0; j < elements; j++) {
         if (getDoubleFromObjectOrReply(c,c->argv[scoreidx+j*2],&scores[j],NULL)
             != C_OK) goto cleanup;
     }
 
     /* Lookup the key and create the sorted set if does not exist. */
-    zobj = lookupKeyWrite(c->db,key);
+    zobj = lookupKeyWrite(c->db,key); // 如果 key 不存在，需要重新创建一个
     if (zobj == NULL) {
         if (xx) goto reply_to_client; /* No key + XX option: nothing to do. */
         if (server.zset_max_ziplist_entries == 0 ||

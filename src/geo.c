@@ -402,6 +402,7 @@ static int sort_gp_desc(const void *a, const void *b) {
  * ==================================================================== */
 
 /* GEOADD key long lat name [long2 lat2 name2 ... longN latN nameN] */
+// longitudes [-180, 180], latitudes [-85.05112878, 85.05112878 ]
 void geoaddCommand(client *c) {
     /* Check arguments number for sanity. */
     if ((c->argc - 2) % 3 != 0) {
@@ -411,8 +412,8 @@ void geoaddCommand(client *c) {
         return;
     }
 
-    int elements = (c->argc - 2) / 3;
-    int argc = 2+elements*2; /* ZADD key score ele ... */
+    int elements = (c->argc - 2) / 3; // 有多少个 elements
+    int argc = 2 /* ZADD key */ + elements*2 /* score ele */; /* ZADD key score ele ... */
     robj **argv = zcalloc(argc*sizeof(robj*));
     argv[0] = createRawStringObject("zadd",4);
     argv[1] = c->argv[1]; /* key */
@@ -420,11 +421,14 @@ void geoaddCommand(client *c) {
 
     /* Create the argument vector to call ZADD in order to add all
      * the score,value pairs to the requested zset, where score is actually
-     * an encoded version of lat,long. */
+     * an encoded version of lat,long.
+     * 创建调用 ZADD 的参数 vector，以添加 score, value 对儿到指定的 zset，
+     * 其中 score 实际上是 lat,long 的编码版本。*/
     int i;
     for (i = 0; i < elements; i++) {
         double xy[2];
 
+        // long lat name 三个参数
         if (extractLongLatOrReply(c, (c->argv+2)+(i*3),xy) == C_ERR) {
             for (i = 0; i < argc; i++)
                 if (argv[i]) decrRefCount(argv[i]);
@@ -437,7 +441,7 @@ void geoaddCommand(client *c) {
         geohashEncodeWGS84(xy[0], xy[1], GEO_STEP_MAX, &hash);
         GeoHashFix52Bits bits = geohashAlign52Bits(hash);
         robj *score = createObject(OBJ_STRING, sdsfromlonglong(bits));
-        robj *val = c->argv[2 + i * 3 + 2];
+        robj *val = c->argv[2 + i * 3 + 2]; // name
         argv[2+i*2] = score;
         argv[3+i*2] = val;
         incrRefCount(val);
