@@ -754,15 +754,28 @@ int updateClientMemUsage(client *c) {
     return 0;
 }
 
-/* Adds the client to the correct memory usage bucket. Each bucket contains
- * all clients with roughly the same amount of memory. This way we group
- * together clients consuming about the same amount of memory and can quickly
- * free them in case we reach maxmemory-clients (client eviction).
+/* Adds the client to the correct memory usage bucket. 
+ * 将 client 添加到正确的内存使用量 bucket 里。
+ *
+ * Each bucket contains all clients with roughly the same amount of memory. 
+ * 每一个 bucket 包含了所有相同内存用量（粗略估算）的 client。
+ * 
+ * This way we group together clients consuming about the same amount of memory 
+ * and can quickly free them in case we reach maxmemory-clients (client eviction).
+ * 我们按内存用量为 group 将 client 组织起来，当我们做 client eviction 是可以快速的释放它们。
+ * 
  * Note that in case of io-threads enabled we have to call this function only
- * after the fan-in phase (when no io-threads are working) because the bucket
- * lists are global. The io-threads themselves track per-client memory usage in
- * updateClientMemUsage(). Here we update the clients to each bucket when all
- * io-threads are done (both for read and write io-threading). */
+ * after the fan-in phase (when no io-threads are working) because the bucket lists are global. 
+ * 注意，在启用 io-threads 的情况下，我们必须只在 fan-in 阶段调用该函数（这时没有 io-threads 线程在工作），
+ * 因为 bucket list 是全局的。
+ * 
+ * The io-threads themselves track per-client memory usage in updateClientMemUsage(). 
+ * io-threads 自己在 updateClientMemUsage 函数里记录每个 client 的内存用量。
+ * 
+ * Here we update the clients to each bucket when all
+ * io-threads are done (both for read and write io-threading). 
+ * 这里我们在所有 io-threads 都完成任务后更新 clients 到每一个 bucket 里。
+ * */
 void updateClientMemUsageBucket(client *c) {
     serverAssert(io_threads_op == IO_THREADS_OP_IDLE);
     int allow_eviction =

@@ -3760,7 +3760,7 @@ void processEventsWhileBlocked(void) {
 
 #define IO_THREADS_MAX_NUM 128
 
-pthread_t io_threads[IO_THREADS_MAX_NUM];
+pthread_t io_threads[IO_THREADS_MAX_NUM]; // 线程 id 数组
 pthread_mutex_t io_threads_mutex[IO_THREADS_MAX_NUM];
 redisAtomic unsigned long io_threads_pending[IO_THREADS_MAX_NUM];
 int io_threads_op;      /* IO_THREADS_OP_IDLE, IO_THREADS_OP_READ or IO_THREADS_OP_WRITE. */ // TODO: should access to this be atomic??!
@@ -3788,16 +3788,17 @@ void *IOThreadMain(void *myid) {
 
     snprintf(thdname, sizeof(thdname), "io_thd_%ld", id);
     redis_set_thread_title(thdname);
-    redisSetCpuAffinity(server.server_cpulist);
+    redisSetCpuAffinity(server.server_cpulist); // 设计 thread i 的 cpu 亲和性
     makeThreadKillable();
 
     while(1) {
         /* Wait for start */
-        for (int j = 0; j < 1000000; j++) {
+        for (int j = 0; j < 1000000; j++) { // 循环等待
             if (getIOPendingCount(id) != 0) break;
         }
 
         /* Give the main thread a chance to stop this thread. */
+        // 给 main thread 一个机会来停止该 thread
         if (getIOPendingCount(id) == 0) {
             pthread_mutex_lock(&io_threads_mutex[id]);
             pthread_mutex_unlock(&io_threads_mutex[id]);
@@ -3813,15 +3814,15 @@ void *IOThreadMain(void *myid) {
         listRewind(io_threads_list[id],&li);
         while((ln = listNext(&li))) {
             client *c = listNodeValue(ln);
-            if (io_threads_op == IO_THREADS_OP_WRITE) {
+            if (io_threads_op == IO_THREADS_OP_WRITE) { // 写
                 writeToClient(c,0);
-            } else if (io_threads_op == IO_THREADS_OP_READ) {
+            } else if (io_threads_op == IO_THREADS_OP_READ) { // 读
                 readQueryFromClient(c->conn);
             } else {
                 serverPanic("io_threads_op value is unknown");
             }
         }
-        listEmpty(io_threads_list[id]);
+        listEmpty(io_threads_list[id]); // 释放 list，即每次处理 io_threads_list 里所有的 client
         setIOPendingCount(id, 0);
     }
 }
@@ -3831,10 +3832,12 @@ void initThreadedIO(void) {
     server.io_threads_active = 0; /* We start with threads not active. */
 
     /* Indicate that io-threads are currently idle */
+    // 表示 io-threads  现在是空闲的
     io_threads_op = IO_THREADS_OP_IDLE;
 
     /* Don't spawn any thread if the user selected a single thread:
      * we'll handle I/O directly from the main thread. */
+    // 如果用户选择的是单线程，不要产生任何线程：在主线程里直接处理 I/O
     if (server.io_threads_num == 1) return;
 
     if (server.io_threads_num > IO_THREADS_MAX_NUM) {
@@ -4051,6 +4054,7 @@ int postponeClientRead(client *c) {
  * it can safely perform post-processing and return to normal synchronous
  * work. */
 int handleClientsWithPendingReadsUsingThreads(void) {
+    // 如果 io_threads 当前不活跃或没有开启使用 io 线程读数据，直接返回
     if (!server.io_threads_active || !server.io_threads_do_reads) return 0;
     int processed = listLength(server.clients_pending_read);
     if (processed == 0) return 0;
@@ -4063,20 +4067,20 @@ int handleClientsWithPendingReadsUsingThreads(void) {
     while((ln = listNext(&li))) {
         client *c = listNodeValue(ln);
         int target_id = item_id % server.io_threads_num;
-        listAddNodeTail(io_threads_list[target_id],c);
+        listAddNodeTail(io_threads_list[target_id],c); // 将 pending read 线程添加到 io_threads_list 数组里
         item_id++;
     }
 
     /* Give the start condition to the waiting threads, by setting the
      * start condition atomic var. */
-    io_threads_op = IO_THREADS_OP_READ;
+    io_threads_op = IO_THREADS_OP_READ; // 切换 io_threads 读写模式
     for (int j = 1; j < server.io_threads_num; j++) {
         int count = listLength(io_threads_list[j]);
-        setIOPendingCount(j, count);
+        setIOPendingCount(j, count); // thread i 有多少 client 需要处理？
     }
 
     /* Also use the main thread to process a slice of clients. */
-    listRewind(io_threads_list[0],&li);
+    listRewind(io_threads_list[0],&li); // main 处理一部分 client
     while((ln = listNext(&li))) {
         client *c = listNodeValue(ln);
         readQueryFromClient(c->conn);
@@ -4088,10 +4092,10 @@ int handleClientsWithPendingReadsUsingThreads(void) {
         unsigned long pending = 0;
         for (int j = 1; j < server.io_threads_num; j++)
             pending += getIOPendingCount(j);
-        if (pending == 0) break;
+        if (pending == 0) break; // 等待其他 io 现成完成读写任务
     }
 
-    io_threads_op = IO_THREADS_OP_IDLE;
+    io_threads_op = IO_THREADS_OP_IDLE; // 切换 io 线程状态为 idle
 
     /* Run the list of clients again to process the new buffers. */
     while(listLength(server.clients_pending_read)) {
