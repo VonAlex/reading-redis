@@ -100,7 +100,7 @@ int HelloPushCall2_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, i
     RedisModuleCallReply *reply;
 
     reply = RedisModule_Call(ctx,"RPUSH","ss",argv[1],argv[2]);
-    RedisModule_ReplyWithCallReply(ctx,reply);
+    RedisModule_ReplyWithCallReply(ctx,reply); // 直接使用 call的返回值
     RedisModule_FreeCallReply(reply);
     return REDISMODULE_OK;
 }
@@ -246,19 +246,20 @@ int HelloRepl1_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int a
     /* This will be replicated *after* the two INCR statements, since
      * the Call() replication has precedence, so the actual replication
      * stream will be:
-     *
+     * Call() replication 有更高的优先级
+     * 
      * MULTI
      * INCR foo
      * INCR bar
      * ECHO c foo
      * EXEC
      */
-    // RedisModule_Replicate 命令在 EXEC 之前
     RedisModule_Replicate(ctx,"ECHO","c","foo");
 
     /* Using the "!" modifier we replicate the command if it
      * modified the dataset in some way. */
-    // c 表示普通 c string
+    // ! -- Sends the Redis command and its arguments to replicas and AOF.
+    // c -- The argument is a pointer to a plain C string (null-terminated).
     RedisModule_Call(ctx,"INCR","c!","foo"); 
     RedisModule_Call(ctx,"INCR","c!","bar");
 
@@ -280,14 +281,17 @@ int HelloRepl1_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int a
 int HelloRepl2_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     if (argc != 2) return RedisModule_WrongArity(ctx);
 
-    RedisModule_AutoMemory(ctx); /* Use automatic memory management. 自动管理内存 */
+    RedisModule_AutoMemory(ctx); /* Use automatic memory management. */
     RedisModuleKey *key = RedisModule_OpenKey(ctx,argv[1],
         REDISMODULE_READ|REDISMODULE_WRITE);
 
     if (RedisModule_KeyType(key) != REDISMODULE_KEYTYPE_LIST)
         return RedisModule_ReplyWithError(ctx,REDISMODULE_ERRORMSG_WRONGTYPE);
 
-    size_t listlen = RedisModule_ValueLength(key);
+    // 返回 key 对应的 value 的长度
+    // 对于 string 来说，返回字符串长度，
+    // 对于其他类型，返回 member 的个数
+    size_t listlen = RedisModule_ValueLength(key); 
     long long sum = 0;
 
     /* Rotate and increment. */
@@ -297,7 +301,7 @@ int HelloRepl2_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int a
         if (RedisModule_StringToLongLong(ele,&val) != REDISMODULE_OK) val = 0;
         val++;
         sum += val;
-        RedisModuleString *newele = RedisModule_CreateStringFromLongLong(ctx,val); // 创建一个新 RedisModuleString
+        RedisModuleString *newele = RedisModule_CreateStringFromLongLong(ctx,val);
         RedisModule_ListPush(key,REDISMODULE_LIST_HEAD,newele);
     }
     RedisModule_ReplyWithLongLong(ctx,sum);
@@ -329,7 +333,7 @@ int HelloToggleCase_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, 
 
     if (keytype == REDISMODULE_KEYTYPE_STRING) {
         size_t len, j;
-        char *s = RedisModule_StringDMA(key,&len,REDISMODULE_WRITE);
+        char *s = RedisModule_StringDMA(key,&len,REDISMODULE_WRITE); // DMA 获得 value 可以直接修改
         for (j = 0; j < len; j++) {
             if (isupper(s[j])) {
                 s[j] = tolower(s[j]);
@@ -394,7 +398,7 @@ int HelloZsumRange_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, i
     double scoresum_b = 0;
 
     RedisModule_ZsetFirstInScoreRange(key,score_start,score_end,0,0);
-    while(!RedisModule_ZsetRangeEndReached(key)) {
+    while(!RedisModule_ZsetRangeEndReached(key)) { // 正向迭代
         double score;
         RedisModuleString *ele = RedisModule_ZsetRangeCurrentElement(key,&score);
         RedisModule_FreeString(ctx,ele);
@@ -404,7 +408,7 @@ int HelloZsumRange_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, i
     RedisModule_ZsetRangeStop(key);
 
     RedisModule_ZsetLastInScoreRange(key,score_start,score_end,0,0);
-    while(!RedisModule_ZsetRangeEndReached(key)) {
+    while(!RedisModule_ZsetRangeEndReached(key)) { // 反向迭代
         double score;
         RedisModuleString *ele = RedisModule_ZsetRangeCurrentElement(key,&score);
         RedisModule_FreeString(ctx,ele);
@@ -579,12 +583,12 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         HelloListSplice_RedisCommand,"write deny-oom",1,2,1) == REDISMODULE_ERR)
         return REDISMODULE_ERR;
 
-    if (RedisModule_CreateCommand(ctx,"hello.list.splice.auto",
+    if (RedisModule_CreateCommand(ctx,"hello.list.splice.auto", // 使用自动内存管理
         HelloListSpliceAuto_RedisCommand,
         "write deny-oom",1,2,1) == REDISMODULE_ERR)
         return REDISMODULE_ERR;
 
-    if (RedisModule_CreateCommand(ctx,"hello.rand.array",
+    if (RedisModule_CreateCommand(ctx,"hello.rand.array", // 返回 n 个随机数字
         HelloRandArray_RedisCommand,"readonly",0,0,0) == REDISMODULE_ERR)
         return REDISMODULE_ERR;
 
