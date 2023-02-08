@@ -961,22 +961,22 @@ ssize_t rdbSaveObject(rio *rdb, robj *o, robj *key) {
             }
             raxStop(&ri);
         }
-    } else if (o->type == OBJ_MODULE) {
+    } else if (o->type == OBJ_MODULE) { // 保存 moudle value
         /* Save a module-specific value. */
         RedisModuleIO io;
-        moduleValue *mv = o->ptr;
-        moduleType *mt = mv->type;
+        moduleValue *mv = o->ptr; // value
+        moduleType *mt = mv->type; // type
 
         /* Write the "module" identifier as prefix, so that we'll be able
          * to call the right module during loading. */
-        int retval = rdbSaveLen(rdb,mt->id);
+        int retval = rdbSaveLen(rdb,mt->id); // 每个 value 保存之前，都要加上 module-id
         if (retval == -1) return -1;
         io.bytes += retval;
 
         /* Then write the module-specific representation + EOF marker. */
         moduleInitIOContext(io,mt,rdb,key);
-        mt->rdb_save(&io,mv->value);
-        retval = rdbSaveLen(rdb,RDB_MODULE_OPCODE_EOF);
+        mt->rdb_save(&io,mv->value); // 使用自定义函数保存 module value
+        retval = rdbSaveLen(rdb,RDB_MODULE_OPCODE_EOF); // 以 0 作为结束符
         if (retval == -1)
             io.error = 1;
         else
@@ -1092,11 +1092,21 @@ int rdbSaveInfoAuxFields(rio *rdb, int flags, rdbSaveInfo *rsi) {
     if (rdbSaveAuxFieldStrInt(rdb,"aof-preamble",aof_preamble) == -1) return -1;
     return 1;
 }
-
+/*
+ *  +--------------------+-------------+------+---------------+------------+
+ *  | opcode | module-id | opcode-uint | when | aux_save func | opcode-eof |
+ *  +-------------------+-------------+-------+--------------+------------+
+ *  opcode        =  RDB_OPCODE_MODULE_AUX
+ *  module-id     =  64 bit 字符
+ *  opcode-uint   =  RDB_MODULE_OPCODE_UINT
+ *  when          =  before(0)/after(1)
+ *  aux_save func =  调用自定义函数 save
+ *  opcode-eof    =  RDB_MODULE_OPCODE_EOF
+ */ 
 ssize_t rdbSaveSingleModuleAux(rio *rdb, int when, moduleType *mt) {
     /* Save a module-specific aux value. */
     RedisModuleIO io;
-    int retval = rdbSaveType(rdb, RDB_OPCODE_MODULE_AUX);
+    int retval = rdbSaveType(rdb, RDB_OPCODE_MODULE_AUX); 
     if (retval == -1) return -1;
     io.bytes += retval;
 
@@ -1108,7 +1118,8 @@ ssize_t rdbSaveSingleModuleAux(rio *rdb, int when, moduleType *mt) {
 
     /* write the 'when' so that we can provide it on loading. add a UINT opcode
      * for backwards compatibility, everything after the MT needs to be prefixed
-     * by an opcode. */
+     * by an opcode.
+     * 加一个 UINT opcode 是为了做向后兼容性 */
     retval = rdbSaveLen(rdb,RDB_MODULE_OPCODE_UINT);
     if (retval == -1) return -1;
     io.bytes += retval;
@@ -1155,8 +1166,7 @@ int rdbSaveRio(rio *rdb, int *error, int flags, rdbSaveInfo *rsi) {
     snprintf(magic,sizeof(magic),"REDIS%04d",RDB_VERSION);
     if (rdbWriteRaw(rdb,magic,9) == -1) goto werr;
     if (rdbSaveInfoAuxFields(rdb,flags,rsi) == -1) goto werr;
-    // 写入 module before 数据
-    if (rdbSaveModulesAux(rdb, REDISMODULE_AUX_BEFORE_RDB) == -1) goto werr;
+    if (rdbSaveModulesAux(rdb, REDISMODULE_AUX_BEFORE_RDB) == -1) goto werr; // save module type
 
     for (j = 0; j < server.dbnum; j++) {
         redisDb *db = server.db+j;
@@ -1218,11 +1228,11 @@ int rdbSaveRio(rio *rdb, int *error, int flags, rdbSaveInfo *rsi) {
         di = NULL; /* So that we don't release it again on error. */
     }
 
-    // 写入 module after 数据
+    // moudle aux 何时写入，取决于 when 参数
     if (rdbSaveModulesAux(rdb, REDISMODULE_AUX_AFTER_RDB) == -1) goto werr;
 
     /* EOF opcode */
-    if (rdbSaveType(rdb,RDB_OPCODE_EOF) == -1) goto werr;
+    if (rdbSaveType(rdb,RDB_OPCODE_EOF) == -1) goto werr; // rdb 结束标识符
 
     /* CRC64 checksum. It will be zero if checksum computation is disabled, the
      * loading code skips the check in this case. */
@@ -1799,9 +1809,9 @@ robj *rdbLoadObject(int rdbtype, rio *rdb, robj *key) {
                 }
             }
         }
-    } else if (rdbtype == RDB_TYPE_MODULE || rdbtype == RDB_TYPE_MODULE_2) {
-        uint64_t moduleid = rdbLoadLen(rdb,NULL);
-        moduleType *mt = moduleTypeLookupModuleByID(moduleid);
+    } else if (rdbtype == RDB_TYPE_MODULE || rdbtype == RDB_TYPE_MODULE_2) { // 加载 module value
+        uint64_t moduleid = rdbLoadLen(rdb,NULL); // 每个 module value 以 module id 为 prefix
+        moduleType *mt = moduleTypeLookupModuleByID(moduleid);// 根据 module id 找到 moduleType，包含了各种处理函数
         char name[10];
 
         if (rdbCheckMode && rdbtype == RDB_TYPE_MODULE_2) {
@@ -1809,23 +1819,24 @@ robj *rdbLoadObject(int rdbtype, rio *rdb, robj *key) {
             return rdbLoadCheckModuleValue(rdb,name);
         }
 
-        if (mt == NULL) {
+        if (mt == NULL) { // 没找到 moduleType
             moduleTypeNameByID(name,moduleid);
             serverLog(LL_WARNING,"The RDB file contains module data I can't load: no matching module '%s'", name);
             exit(1);
         }
         RedisModuleIO io;
         moduleInitIOContext(io,mt,rdb,key);
-        io.ver = (rdbtype == RDB_TYPE_MODULE) ? 1 : 2;
+        io.ver = (rdbtype == RDB_TYPE_MODULE) ? 1 : 2; // 新版本的 module 类型为 RDB_TYPE_MODULE_2
         /* Call the rdb_load method of the module providing the 10 bit
          * encoding version in the lower 10 bits of the module ID. */
-        void *ptr = mt->rdb_load(&io,moduleid&1023);
+        void *ptr = mt->rdb_load(&io,moduleid&1023); // 根据 moduleType 中的 rdb_load 函数加载 value
         if (io.ctx) {
             moduleFreeContext(io.ctx);
             zfree(io.ctx);
         }
 
         /* Module v2 serialization has an EOF mark at the end. */
+        // Module v2 序列化在结尾有一个 EOF 标识符
         if (io.ver == 2) {
             uint64_t eof = rdbLoadLen(rdb,NULL);
             if (eof != RDB_MODULE_OPCODE_EOF) {
@@ -1834,7 +1845,7 @@ robj *rdbLoadObject(int rdbtype, rio *rdb, robj *key) {
             }
         }
 
-        if (ptr == NULL) {
+        if (ptr == NULL) { // 加载遇到问题，退出进程
             moduleTypeNameByID(name,moduleid);
             serverLog(LL_WARNING,"The RDB file contains module data for the module type '%s', that the responsible module is not able to load. Check for modules log above for additional clues.", name);
             exit(1);
@@ -2024,23 +2035,25 @@ int rdbLoadRio(rio *rdb, rdbSaveInfo *rsi, int loading_aof) {
         } else if (type == RDB_OPCODE_MODULE_AUX) {
             /* Load module data that is not related to the Redis key space.
              * Such data can be potentially be stored both before and after the
-             * RDB keys-values section. */
+             * RDB keys-values section. 
+             * 加载与 Redis key 空间无关的 module 数据，这部分数据可能存在于 RDB keys-values 之前或之后 */
             uint64_t moduleid = rdbLoadLen(rdb,NULL);
             int when_opcode = rdbLoadLen(rdb,NULL);
             int when = rdbLoadLen(rdb,NULL);
-            if (when_opcode != RDB_MODULE_OPCODE_UINT)
+            if (when_opcode != RDB_MODULE_OPCODE_UINT) // when_opcode 不合法，panic 掉进程
                 rdbExitReportCorruptRDB("bad when_opcode");
             moduleType *mt = moduleTypeLookupModuleByID(moduleid);
             char name[10];
-            moduleTypeNameByID(name,moduleid);
+            moduleTypeNameByID(name,moduleid); // 根据 moduleid 还原 name 字符串
 
-            if (!rdbCheckMode && mt == NULL) {
+            if (!rdbCheckMode && mt == NULL) { // 加载 rdb 时没找到对应的 module，退出进程
                 /* Unknown module. */
                 serverLog(LL_WARNING,"The RDB file contains AUX module data I can't load: no matching module '%s'", name);
                 exit(1);
             } else if (!rdbCheckMode && mt != NULL) {
                 if (!mt->aux_load) {
-                    /* Module doesn't support AUX. */
+                    /* Module doesn't support AUX. 该 module 不支持 aux 加载 */
+                    // RDB 文件包含了 module AUX data，但却没有提供 load 函数，一定有问题，退出进程
                     serverLog(LL_WARNING,"The RDB file contains module AUX data, but the module '%s' doesn't seem to support it.", name);
                     exit(1);
                 }
@@ -2059,7 +2072,7 @@ int rdbLoadRio(rio *rdb, rdbSaveInfo *rsi, int loading_aof) {
                     moduleFreeContext(io.ctx);
                     zfree(io.ctx);
                 }
-                uint64_t eof = rdbLoadLen(rdb,NULL);
+                uint64_t eof = rdbLoadLen(rdb,NULL); // 记载 moudle opcode eof
                 if (eof != RDB_MODULE_OPCODE_EOF) {
                     serverLog(LL_WARNING,"The RDB file contains module AUX data for the module '%s' that is not terminated by the proper module value EOF marker", name);
                     exit(1);

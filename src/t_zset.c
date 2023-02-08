@@ -1624,7 +1624,7 @@ void zaddGenericCommand(client *c, int flags) {
 
     for (j = 0; j < elements; j++) {
         double newscore;
-        score = scores[j];
+        score = scores[j]; // 从 cmd 里解析的 score
         int retflags = flags;
 
         ele = c->argv[scoreidx+1+j*2]->ptr;

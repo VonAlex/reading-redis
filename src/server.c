@@ -2396,7 +2396,8 @@ void forceCommandPropagation(client *c, int flags) {
 
 /* Avoid that the executed command is propagated at all. This way we
  * are free to just propagate what we want using the alsoPropagate()
- * API. */
+ * API. 
+ * 防止被执行的命令做同步动作，这就使得我们可以使用 alsoPropagate() api 同步想要做同步的 cmd。*/
 void preventCommandPropagation(client *c) {
     c->flags |= CLIENT_PREVENT_PROP;
 }
@@ -2475,7 +2476,7 @@ void call(client *c, int flags) {
     dirty = server.dirty;
     updateCachedTime(0);
     start = server.ustime;
-    c->cmd->proc(c); // 调用函数处理命令
+    c->cmd->proc(c); // 调用相应的函数处理 cmd
     duration = ustime()-start;
     dirty = server.dirty-dirty;
     if (dirty < 0) dirty = 0;
@@ -2515,7 +2516,7 @@ void call(client *c, int flags) {
 
     /* Propagate the command into the AOF and replication link */
     if (flags & CMD_CALL_PROPAGATE &&
-        (c->flags & CLIENT_PREVENT_PROP) != CLIENT_PREVENT_PROP)
+        (c->flags & CLIENT_PREVENT_PROP) != CLIENT_PREVENT_PROP) // 未禁止同步逻辑
     {
         int propagate_flags = PROPAGATE_NONE;
 
@@ -2533,21 +2534,22 @@ void call(client *c, int flags) {
          * or if we don't have the call() flags to do so. */
         if (c->flags & CLIENT_PREVENT_REPL_PROP ||
             !(flags & CMD_CALL_PROPAGATE_REPL))
-                propagate_flags &= ~PROPAGATE_REPL;
+                propagate_flags &= ~PROPAGATE_REPL; // 不做 repl 同步
         if (c->flags & CLIENT_PREVENT_AOF_PROP ||
             !(flags & CMD_CALL_PROPAGATE_AOF))
-                propagate_flags &= ~PROPAGATE_AOF;
+                propagate_flags &= ~PROPAGATE_AOF; // / 不做 aof 同步
 
         /* Call propagate() only if at least one of AOF / replication
          * propagation is needed. Note that modules commands handle replication
          * in an explicit way, so we never replicate them automatically.
-         * modules 命令会以明确的方式处理 replication，因此我们从不自动 replicate */
+         * 
+         * modules 命令会以明确的方式处理 replication，因此我们不自动 replicate */
         if (propagate_flags != PROPAGATE_NONE && !(c->cmd->flags & CMD_MODULE))
             propagate(c->cmd,c->db->id,c->argv,c->argc,propagate_flags);
     }
 
-    /* Restore the old replication flags, since call() can be executed
-     * recursively. */
+    /* Restore the old replication flags, 
+     * since call() can be executed recursively. */
     c->flags &= ~(CLIENT_FORCE_AOF|CLIENT_FORCE_REPL|CLIENT_PREVENT_PROP);
     c->flags |= client_old_flags &
         (CLIENT_FORCE_AOF|CLIENT_FORCE_REPL|CLIENT_PREVENT_PROP);

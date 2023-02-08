@@ -196,11 +196,11 @@ typedef void (*RedisModuleCommandFilterFunc) (RedisModuleCommandFilterCtx *filte
 
 #define REDISMODULE_TYPE_METHOD_VERSION 2
 typedef struct RedisModuleTypeMethods {
-    uint64_t version;
-    RedisModuleTypeLoadFunc rdb_load;
-    RedisModuleTypeSaveFunc rdb_save;
-    RedisModuleTypeRewriteFunc aof_rewrite;
-    RedisModuleTypeMemUsageFunc mem_usage;
+    uint64_t version; // 必须
+    RedisModuleTypeLoadFunc rdb_load; // 必须
+    RedisModuleTypeSaveFunc rdb_save; // 必须
+    RedisModuleTypeRewriteFunc aof_rewrite; // 必须
+    RedisModuleTypeMemUsageFunc mem_usage; // 可选 ..
     RedisModuleTypeDigestFunc digest;
     RedisModuleTypeFreeFunc free;
     RedisModuleTypeAuxLoadFunc aux_load;

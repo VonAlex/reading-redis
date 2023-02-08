@@ -377,8 +377,13 @@ void decrRefCountVoid(void *o) {
 }
 
 /* This function set the ref count to zero without freeing the object.
+ * 这个函数把引用计数置为 0，但不释放 object。
+ *
  * It is useful in order to pass a new object to functions incrementing
- * the ref count of the received object. Example:
+ * the ref count of the received object. 
+ * 为了将一个新对象传递给增加接收对象的 ref 计数的函数，它很有用。
+ * 
+ * Example:
  *
  *    functionThatWillIncrementRefCount(resetRefCount(CreateObject(...)));
  *
@@ -618,7 +623,7 @@ int getDoubleFromObject(const robj *o, double *target) {
             if (sdslen(o->ptr) == 0 ||
                 isspace(((const char*)o->ptr)[0]) ||
                 (size_t)(eptr-(char*)o->ptr) != sdslen(o->ptr) ||
-                (errno == ERANGE &&
+                (errno == ERANGE && // 超出数字范围了
                     (value == HUGE_VAL || value == -HUGE_VAL || value == 0)) ||
                 isnan(value))
                 return C_ERR;

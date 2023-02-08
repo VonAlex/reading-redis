@@ -1274,7 +1274,8 @@ void evalGenericCommand(client *c, int evalsha) {
      * deterministic sequences).
      *
      * Thanks to this flag we'll raise an error every time a write command
-     * is called after a random command was used. */
+     * is called after a random command was used. 
+     * 这个 flag 用于标识，每次在随机命令执行后，再执行 write 命令会报错 */
     server.lua_random_dirty = 0;
     server.lua_write_dirty = 0;
     server.lua_replicate_commands = server.lua_always_replicate_commands;
@@ -1298,6 +1299,7 @@ void evalGenericCommand(client *c, int evalsha) {
     funcname[1] = '_';
     if (!evalsha) {
         /* Hash the code if this is an EVAL call */
+        // f_xxxx
         sha1hex(funcname+2,c->argv[1]->ptr,sdslen(c->argv[1]->ptr));
     } else {
         /* We already have the SHA if it is a EVALSHA */
@@ -1410,8 +1412,9 @@ void evalGenericCommand(client *c, int evalsha) {
         lua_pop(lua,1); /* Remove the error handler. */
     }
 
-    /* If we are using single commands replication, emit EXEC if there
-     * was at least a write. */
+    /* If we are using single commands replication,
+     * emit EXEC if there was at least a write.
+     * 如果我们想要同步单个命令，如果至少有一个 write，需要执行 EXEC */
     if (server.lua_replicate_commands) {
         preventCommandPropagation(c);
         if (server.lua_multi_emitted) {
@@ -1423,21 +1426,28 @@ void evalGenericCommand(client *c, int evalsha) {
         }
     }
 
-    /* EVALSHA should be propagated to Slave and AOF file as full EVAL, unless
-     * we are sure that the script was already in the context of all the
+    /* EVALSHA should be propagated to Slave and AOF file as full EVAL, 
+     * unless we are sure that the script was already in the context of all the
      * attached slaves *and* the current AOF file if enabled.
-     *
+     * EVALSHA 应该作为完整的 EVAL 同步给 Slave and AOF，
+     * 除非我们确定脚本已经在 slaves 和 aof 上下文里。
+     * 
      * To do so we use a cache of SHA1s of scripts that we already propagated
      * as full EVAL, that's called the Replication Script Cache.
+     * 为了达到这个目的，我们使用已经用 EVAL 同步过的脚本 SHA1s 作为缓存，这称为 Replication Script Cache。
      *
      * For repliation, everytime a new slave attaches to the master, we need to
      * flush our cache of scripts that can be replicated as EVALSHA, while
-     * for AOF we need to do so every time we rewrite the AOF file. */
+     * for AOF we need to do so every time we rewrite the AOF file. 
+     * 对于 repliation，每次有新的 slave 连到 master 上时，我们需要清掉用于同步 EVALSHA 的 scripts 缓存，
+     * 而对于 AOF，我们每次重写 AOF 的时候都需要做一遍。*/
     if (evalsha && !server.lua_replicate_commands) {
         if (!replicationScriptCacheExists(c->argv[1]->ptr)) {
             /* This script is not in our script cache, replicate it as
              * EVAL, then add it into the script cache, as from now on
-             * slaves and AOF know about it. */
+             * slaves and AOF know about it.
+             * 这个脚本在 cache 里找不到，因此以 EVAL 同步，并把它加到 cacahe 里，
+             * 因为从现在起，slaves 和 AOF 已经认识它了。 */
             robj *script = dictFetchValue(server.lua_scripts,c->argv[1]->ptr);
 
             replicationScriptCacheAdd(c->argv[1]->ptr);
@@ -1446,7 +1456,8 @@ void evalGenericCommand(client *c, int evalsha) {
             /* If the script did not produce any changes in the dataset we want
              * just to replicate it as SCRIPT LOAD, otherwise we risk running
              * an aborted script on slaves (that may then produce results there)
-             * or just running a CPU costly read-only script on the slaves. */
+             * or just running a CPU costly read-only script on the slaves.
+             * 如果脚本没有对 dataset 产生任何变化，我们仅作为 SCRIPT LOAD 同步 */
             if (server.dirty == initial_server_dirty) {
                 rewriteClientCommandVector(c,3,
                     resetRefCount(createStringObject("SCRIPT",6)),

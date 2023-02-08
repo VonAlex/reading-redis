@@ -121,8 +121,8 @@ int HelloTypeInsert_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, 
     /* Create an empty value object if the key is currently empty. */
     struct HelloTypeObject *hto;
     if (type == REDISMODULE_KEYTYPE_EMPTY) {
-        hto = createHelloTypeObject();
-        RedisModule_ModuleTypeSetValue(key,HelloType,hto);
+        hto = createHelloTypeObject(); // 创建一个 HelloTypeObject 类型的变量
+        RedisModule_ModuleTypeSetValue(key,HelloType,hto); // key: hto, 自定义类型 HelloType
     } else {
         hto = RedisModule_ModuleTypeGetValue(key);
     }
@@ -158,16 +158,16 @@ int HelloTypeRange_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, i
             "ERR invalid first or count parameters");
     }
 
-    struct HelloTypeObject *hto = RedisModule_ModuleTypeGetValue(key);
+    struct HelloTypeObject *hto = RedisModule_ModuleTypeGetValue(key); // get 自定义类型 value
     struct HelloTypeNode *node = hto ? hto->head : NULL;
-    RedisModule_ReplyWithArray(ctx,REDISMODULE_POSTPONED_ARRAY_LEN);
+    RedisModule_ReplyWithArray(ctx,REDISMODULE_POSTPONED_ARRAY_LEN); // 返回数组
     long long arraylen = 0;
     while(node && count--) {
         RedisModule_ReplyWithLongLong(ctx,node->value);
         arraylen++;
         node = node->next;
     }
-    RedisModule_ReplySetArrayLength(ctx,arraylen);
+    RedisModule_ReplySetArrayLength(ctx,arraylen); // 设置数组长度
     return REDISMODULE_OK;
 }
 

@@ -1259,6 +1259,7 @@ int *getKeysUsingCommandTable(struct redisCommand *cmd,robj **argv, int argc, in
  *
  * This function uses the command table if a command-specific helper function
  * is not required, otherwise it calls the command-specific function. */
+ // 返回 key 索引数组，以及 key 的个数
 int *getKeysFromCommand(struct redisCommand *cmd, robj **argv, int argc, int *numkeys) {
     if (cmd->flags & CMD_MODULE_GETKEYS) { // 使用 module 指定的 getkeys_proc
         return moduleGetCommandKeysViaAPI(cmd,argv,argc,numkeys);

@@ -47,7 +47,7 @@ struct RedisModule {
     char *name;     /* Module name. */
     int ver;        /* Module version. We use just progressive integers. */
     int apiver;     /* Module API version as requested during initialization.*/
-    list *types;    /* Module data types. 一个 moudle 可能有多个新数据类型 */
+    list *types;    /* Module data types. 一个 moudle 可能新增多个数据类型 */
     list *usedby;   /* List of modules using APIs from this one. */
     list *using;    /* List of modules we use some APIs of. */
     list *filters;  /* List of filters the module has registered. */
@@ -1405,26 +1405,34 @@ void moduleReplicateMultiIfNeeded(RedisModuleCtx *ctx) {
 
 /* Replicate the specified command and arguments to slaves and AOF, as effect
  * of execution of the calling command implementation.
+ * 复制特定的命令和参数到 slaves 和 AOF 里，作为调用命令实现执行的影响
  *
  * The replicated commands are always wrapped into the MULTI/EXEC that
  * contains all the commands replicated in a given module command
  * execution. However the commands replicated with RedisModule_Call()
  * are the first items, the ones replicated with RedisModule_Replicate()
  * will all follow before the EXEC.
+ * 要复制的命令总是包裹在 MULTI/EXEC 中，涵盖在给定 module 命令执行包含的所有命令。
+ * 然而，使用 RedisModule_Call() 复制的命令是第一项，
+ * 使用 RedisModule_Replicate() 复制的命令将在 EXEC 之前。
+ * 
  *
  * Modules should try to use one interface or the other.
  *
  * This command follows exactly the same interface of RedisModule_Call(),
  * so a set of format specifiers must be passed, followed by arguments
  * matching the provided format specifiers.
+ * 该命令严格遵循与 RedisModule_Call() 一致的接口，因此必须传递一组 format 说明符。
  *
  * Please refer to RedisModule_Call() for more information.
  *
  * Using the special "A" and "R" modifiers, the caller can exclude either
  * the AOF or the replicas from the propagation of the specified command.
  * Otherwise, by default, the command will be propagated in both channels.
+ * 使用特殊的 “A” 和 “R” 修饰符，调用方可以针对特定命令指定同步到 AOF 或者从库，否则，默认两者都会同步到。
  *
  * ## Note about calling this function from a thread safe context:
+ * 注意，从一个线程安全的 ctx 中调用此函数。
  *
  * Normally when you call this function from the callback implementing a
  * module command, or any other callback provided by the Redis Module API,
@@ -1435,7 +1443,11 @@ void moduleReplicateMultiIfNeeded(RedisModuleCtx *ctx) {
  * at will, the behavior is different: MULTI/EXEC wrapper is not emitted
  * and the command specified is inserted in the AOF and replication stream
  * immediately.
- *
+ * 当你在一个实现了 module 命令的回调里调用该函数时，或者任何 Redis Module API 提供的其他回调里，
+ * Redis 将在回调的 ctx 里累计对该函数的所有调用，并将所有命令以 MULTI/EXEC 事务包裹着同步下去。
+ * 然而，从一个线程安全的 ctx 调用该函数时，该 ctx 可能存在未定义的时间量，并可以随意锁定/解锁，行为是不同的：
+ * MULTI/EXEC wrapper 未发出 ？？？
+ * 
  * ## Return value
  *
  * The command returns REDISMODULE_ERR if the format specifiers are invalid
@@ -3126,7 +3138,10 @@ moduleType *moduleTypeLookupModuleByName(const char *name) {
 
 /* Lookup a module by ID, with caching. This function is used during RDB
  * loading. Modules exporting data types should never be able to unload, so
- * our cache does not need to expire. */
+ * our cache does not need to expire. 
+ * 使用 cache 通过 ID 查找 module，这个函数在 RDB 加载时会使用到。
+ * Modules 导出的数据类型不应该卸载，所以我们的 cache 不需要过期。
+ * */
 #define MODULE_LOOKUP_CACHE_SIZE 3
 
 moduleType *moduleTypeLookupModuleByID(uint64_t id) {
@@ -3140,6 +3155,7 @@ moduleType *moduleTypeLookupModuleByID(uint64_t id) {
     for (j = 0; j < MODULE_LOOKUP_CACHE_SIZE && cache[j].mt != NULL; j++)
         if (cache[j].id == id) return cache[j].mt;
 
+    // cache 里没找到，接下来从 modules dict 里查找
     /* Slow module by module lookup. */
     moduleType *mt = NULL;
     dictIterator *di = dictGetIterator(modules);
@@ -3155,7 +3171,7 @@ moduleType *moduleTypeLookupModuleByID(uint64_t id) {
             moduleType *this_mt = ln->value;
             /* Compare only the 54 bit module identifier and not the
              * encoding version. */
-            if (this_mt->id >> 10 == id >> 10) {
+            if (this_mt->id >> 10 == id >> 10) { // 忽略版本号，只比较 module name
                 mt = this_mt;
                 break;
             }
@@ -3175,14 +3191,15 @@ moduleType *moduleTypeLookupModuleByID(uint64_t id) {
  * error when RDB files contain module data we can't load.
  * The buffer pointed by 'name' must be 10 bytes at least. The function will
  * fill it with a null terminated module name. */
+// 6|6|6|6|6|6|6|6|6|10
 void moduleTypeNameByID(char *name, uint64_t moduleid) {
     const char *cset = ModuleTypeNameCharSet;
 
     name[9] = '\0';
     char *p = name+8;
-    moduleid >>= 10;
+    moduleid >>= 10; // 移除版本
     for (int j = 0; j < 9; j++) {
-        *p-- = cset[moduleid & 63];
+        *p-- = cset[moduleid & 63]; // 0b111111 低 6 位
         moduleid >>= 6;
     }
 }
@@ -3264,11 +3281,14 @@ void moduleTypeNameByID(char *name, uint64_t moduleid) {
  *      }
  */
 moduleType *RM_CreateDataType(RedisModuleCtx *ctx, const char *name, int encver, void *typemethods_ptr) {
-    uint64_t id = moduleTypeEncodeId(name,encver);
+    // 将 name 和 版本转换成一个 64 位整数
+    // 版本号取值范围 [0, 1023]，name 字符串长度必须为 9
+    // 6|6|6|6|6|6|6|6|6|10
+    uint64_t id = moduleTypeEncodeId(name,encver); 
     if (id == 0) return NULL;
-    if (moduleTypeLookupModuleByName(name) != NULL) return NULL;
+    if (moduleTypeLookupModuleByName(name) != NULL) return NULL; // 从 module 查找 name
 
-    long typemethods_version = ((long*)typemethods_ptr)[0];
+    long typemethods_version = ((long*)typemethods_ptr)[0]; // 获取首字段 version
     if (typemethods_version == 0) return NULL;
 
     struct typemethods {
@@ -3284,7 +3304,7 @@ moduleType *RM_CreateDataType(RedisModuleCtx *ctx, const char *name, int encver,
             moduleTypeAuxSaveFunc aux_save;
             int aux_save_triggers;
         } v2;
-    } *tms = (struct typemethods*) typemethods_ptr;
+    } *tms = (struct typemethods*) typemethods_ptr; // 将 typemethods_ptr 转换成 typemethods struct
 
     moduleType *mt = zcalloc(sizeof(*mt));
     mt->id = id;
@@ -3295,7 +3315,7 @@ moduleType *RM_CreateDataType(RedisModuleCtx *ctx, const char *name, int encver,
     mt->mem_usage = tms->mem_usage;
     mt->digest = tms->digest;
     mt->free = tms->free;
-    if (tms->version >= 2) {
+    if (tms->version >= 2) { // 只有 >= 2 的版本才支持 aux_load/aux_save/aux_save_triggers
         mt->aux_load = tms->v2.aux_load;
         mt->aux_save = tms->v2.aux_save;
         mt->aux_save_triggers = tms->v2.aux_save_triggers;
@@ -3581,7 +3601,7 @@ ssize_t rdbSaveModulesAux(rio *rdb, int when) {
         listRewind(module->types,&li);
         while((ln = listNext(&li))) {
             moduleType *mt = ln->value;
-            if (!mt->aux_save || !(mt->aux_save_triggers & when))
+            if (!mt->aux_save || !(mt->aux_save_triggers & when)) // 未定义 aux_save 行为，或即使定义了，但触发时机不对
                 continue;
             ssize_t ret = rdbSaveSingleModuleAux(rdb, when, mt);
             if (ret==-1) {
