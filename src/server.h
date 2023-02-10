@@ -825,6 +825,11 @@ typedef struct zskiplist {
     int level;
 } zskiplist;
 
+typedef struct zset {
+    dict *dict;
+    zskiplist *zsl;
+} zset;
+
 typedef struct clientBufferLimitsConfig {
     unsigned long long hard_limit_bytes;
     unsigned long long soft_limit_bytes;
