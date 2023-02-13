@@ -45,7 +45,7 @@
 struct RedisModule {
     void *handle;   /* Module dlopen() handle. */
     char *name;     /* Module name. */
-    int ver;        /* Module version. We use just progressive integers. */
+    int ver;        /* Module version. We use just progressive integers. 用于 module openAPI 版本变更 */
     int apiver;     /* Module API version as requested during initialization.*/
     list *types;    /* Module data types. 一个 moudle 可能新增多个数据类型 */
     list *usedby;   /* List of modules using APIs from this one. */
@@ -128,7 +128,7 @@ struct RedisModuleBlockedClient;
 
 struct RedisModuleCtx {
     void *getapifuncptr;            /* NOTE: Must be the first field. 获取 Module API 的函数 */
-    struct RedisModule *module;     /* Module reference. 当前正执行命令的模块，在 RM_Init() 时赋值 */
+    struct RedisModule *module;     /* Module reference. 当前正执行命令的模块，在 RM_Init() 中调用 RM_SetModuleAttribs 赋值 */
     client *client;                 /* Client calling a command. 当前正执行命令的 client */
     struct RedisModuleBlockedClient *blocked_client; /* Blocked client for
                                                         thread safe context. */
@@ -818,7 +818,7 @@ int RM_CreateCommand(RedisModuleCtx *ctx, const char *name, RedisModuleCmdFunc c
 void RM_SetModuleAttribs(RedisModuleCtx *ctx, const char *name, int ver, int apiver) {
     RedisModule *module;
 
-    if (ctx->module != NULL) return;
+    if (ctx->module != NULL) return; // ctx 已经绑定了 module，立即退出
     module = zmalloc(sizeof(*module));
     module->name = sdsnew((char*)name);
     module->ver = ver;
@@ -5003,10 +5003,12 @@ void RM_GetRandomHexChars(char *dst, size_t len) {
  * Modules API exporting / importing
  * -------------------------------------------------------------------------- */
 
-/* This function is called by a module in order to export some API with a
- * given name. Other modules will be able to use this API by calling the
+/* This function is called by a module in order to export some API with a given name. 
+ * Other modules will be able to use this API by calling the
  * symmetrical function RM_GetSharedAPI() and casting the return value to
  * the right function pointer.
+ * 该函数被一个 module 调用，为了以给定的名字到处某些 API。
+ * 其他 module 将可以通过调用对称函数 RM_GetSharedAPI() 来使用该 API，并将返回值转换成正确的函数指针。
  *
  * The function will return REDISMODULE_OK if the name is not already taken,
  * otherwise REDISMODULE_ERR will be returned and no operation will be
@@ -5640,7 +5642,8 @@ size_t moduleCount(void) {
 }
 
 /* Register all the APIs we export. Keep this function at the end of the
- * file so that's easy to seek it to add new entries. */
+ * file so that's easy to seek it to add new entries. 
+ * 注册所有我们要导出的 API */
 void moduleRegisterCoreAPI(void) {
     server.moduleapi = dictCreate(&moduleAPIDictType,NULL);
     server.sharedapi = dictCreate(&moduleAPIDictType,NULL);

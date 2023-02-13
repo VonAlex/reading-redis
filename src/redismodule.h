@@ -387,6 +387,7 @@ static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int 
 static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int apiver) {
     void *getapifuncptr = ((void**)ctx)[0]; // 获取到 ctx 中的 getapifuncptr 属性，初始化时被赋值为 RM_GetApi
   
+    // 为 RedisModule_GetApi 函数赋值，指定为 redis core 中 RM_GetApi 函数的地址
     RedisModule_GetApi = (int (*)(const char *, void *)) (unsigned long)getapifuncptr;
 
     // 从 server.moduleapi 中根据名字取出函数地址，为 RedisModule_* 函数指针赋值
@@ -557,6 +558,7 @@ static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int 
     REDISMODULE_GET_API(CommandFilterArgDelete);
 #endif
 
+    // 该 module 是否已经存在了
     if (RedisModule_IsModuleNameBusy && RedisModule_IsModuleNameBusy(name)) return REDISMODULE_ERR;
 
     // RM_SetModuleAttribs
