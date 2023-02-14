@@ -3799,7 +3799,7 @@ void *IOThreadMain(void *myid) {
     while(1) {
         /* Wait for start */
         for (int j = 0; j < 1000000; j++) { // 循环等待 thread 上有 pending client 需要处理
-            if (getIOPendingCount(id) != 0) break;
+            if (getIOPendingCount(id) != 0) break; // 原子变量做线程同步
         }
 
         /* Give the main thread a chance to stop this thread. */
