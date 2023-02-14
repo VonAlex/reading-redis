@@ -1058,7 +1058,9 @@ void RM_RetainString(RedisModuleCtx *ctx, RedisModuleString *str) {
 
 /* Given a string module object, this function returns the string pointer
  * and length of the string. The returned pointer and length should only
- * be used for read only accesses and never modified. */
+ * be used for read only accesses and never modified. 
+ * 给定一个 string module 对象，该函数返回字符串指针和字符串的长度。返回值应该仅用于 read，不要做任何修改
+ * */
 const char *RM_StringPtrLen(const RedisModuleString *str, size_t *len) {
     if (str == NULL) {
         const char *errmsg = "(NULL string reply referenced in module)";
