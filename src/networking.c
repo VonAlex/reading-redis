@@ -1357,7 +1357,7 @@ int processMultibulkBuffer(client *c) {
             }
 
             c->qb_pos = newline-c->querybuf+2;
-            if (ll >= PROTO_MBULK_BIG_ARG) {
+            if (ll >= PROTO_MBULK_BIG_ARG) { // $x 里 x 长度 > 32K
                 /* If we are going to read a large object from network
                  * try to make it likely that it will start at c->querybuf
                  * boundary so that we can optimize object creation
@@ -1367,8 +1367,8 @@ int processMultibulkBuffer(client *c) {
                  * or equal to ll+2. If the data length is greater than
                  * ll+2, trimming querybuf is just a waste of time, because
                  * at this time the querybuf contains not only our bulk. */
-                if (sdslen(c->querybuf)-c->qb_pos <= (size_t)ll+2) {
-                    sdsrange(c->querybuf,c->qb_pos,-1);
+                if (sdslen(c->querybuf)-c->qb_pos <= (size_t)ll+2) { // querybuf 不足以容纳 x
+                    sdsrange(c->querybuf,c->qb_pos,-1); // 取出来 querybuf 中还未读出的数据
                     c->qb_pos = 0;
                     /* Hint the sds library about the amount of bytes this string is
                      * going to contain. */
@@ -1497,12 +1497,12 @@ void processInputBuffer(client *c) {
  * is flagged as master. Usually you want to call this instead of the
  * raw processInputBuffer(). */
 void processInputBufferAndReplicate(client *c) {
-    if (!(c->flags & CLIENT_MASTER)) {
+    if (!(c->flags & CLIENT_MASTER)) { // c 不是 master（ 数据来源于用户 ）
         processInputBuffer(c);
-    } else {
+    } else { // c 是 master （ 数据来源于用户 ）
         size_t prev_offset = c->reploff;
         processInputBuffer(c);
-        size_t applied = c->reploff - prev_offset;
+        size_t applied = c->reploff - prev_offset; // applied 的数据量
         if (applied) {
             replicationFeedSlavesFromMasterStream(server.slaves,
                     c->pending_querybuf, applied);
@@ -1536,22 +1536,22 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     }
 
     qblen = sdslen(c->querybuf);
-    if (c->querybuf_peak < qblen) c->querybuf_peak = qblen;
-    c->querybuf = sdsMakeRoomFor(c->querybuf, readlen);
+    if (c->querybuf_peak < qblen) c->querybuf_peak = qblen; // 更新峰值
+    c->querybuf = sdsMakeRoomFor(c->querybuf, readlen); // 读 16k 的数据
     nread = read(fd, c->querybuf+qblen, readlen);
     if (nread == -1) {
-        if (errno == EAGAIN) {
+        if (errno == EAGAIN) { // 下次再读
             return;
         } else {
             serverLog(LL_VERBOSE, "Reading from client: %s",strerror(errno));
             freeClient(c);
             return;
         }
-    } else if (nread == 0) {
+    } else if (nread == 0) { // 连接关闭了
         serverLog(LL_VERBOSE, "Client closed connection");
         freeClient(c);
         return;
-    } else if (c->flags & CLIENT_MASTER) {
+    } else if (c->flags & CLIENT_MASTER) { // 数据来自于 master
         /* Append the query buffer to the pending (not applied) buffer
          * of the master. We'll use this buffer later in order to have a
          * copy of the string applied by the last command executed. */
@@ -1563,7 +1563,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     c->lastinteraction = server.unixtime;
     if (c->flags & CLIENT_MASTER) c->read_reploff += nread;
     server.stat_net_input_bytes += nread;
-    if (sdslen(c->querybuf) > server.client_max_querybuf_len) {
+    if (sdslen(c->querybuf) > server.client_max_querybuf_len) { // client-query-buffer-limit 配置限制了 client buffer 堆积的长度，默认 1G
         sds ci = catClientInfoString(sdsempty(),c), bytes = sdsempty();
 
         bytes = sdscatrepr(bytes,c->querybuf,64);
@@ -1574,12 +1574,21 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         return;
     }
 
-    /* Time to process the buffer. If the client is a master we need to
+    /* Time to process the buffer.
+     *
+     * If the client is a master we need to
      * compute the difference between the applied offset before and after
-     * processing the buffer, to understand how much of the replication stream
-     * was actually applied to the master state: this quantity, and its
-     * corresponding part of the replication stream, will be propagated to
-     * the sub-slaves and to the replication backlog. */
+     * processing the buffer, 
+     * 如果 client 是 master，我们需要计算在处理 buffer 前后 applied offset 的差值。
+     * 
+     * to understand how much of the replication stream
+     * was actually applied to the master state: 
+     * 以便理解复制数据流中有多少数据被应用到 master 状态了
+     * 
+     * this quantity, and its corresponding part of the replication stream, 
+     * will be propagated to the sub-slaves and to the replication backlog. 
+     * 数据量以及其与复制流相应的部分将传递给子 slave 和 replication backlog
+     * */
     processInputBufferAndReplicate(c);
 }
 

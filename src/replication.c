@@ -290,9 +290,9 @@ void replicationFeedSlavesFromMasterStream(list *slaves, char *buf, size_t bufle
         printf("\n");
     }
 
-    if (server.repl_backlog) feedReplicationBacklog(buf,buflen);
+    if (server.repl_backlog) feedReplicationBacklog(buf,buflen); 
     listRewind(slaves,&li);
-    while((ln = listNext(&li))) {
+    while((ln = listNext(&li))) { // 将我们从 master 收到的数据发送给子 slaves
         client *slave = ln->value;
 
         /* Don't feed slaves that are still waiting for BGSAVE to start */
