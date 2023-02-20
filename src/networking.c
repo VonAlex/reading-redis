@@ -2336,6 +2336,7 @@ int processInputBuffer(client *c) {
             /* If we are in the context of an I/O thread, we can't really
              * execute the command here. All we can do is to flag the client
              * as one that needs to process the command. */
+            // 如果我们在 I/O thread 的上下文中，我们不能真正的执行命令
             if (io_threads_op != IO_THREADS_OP_IDLE) {
                 serverAssert(io_threads_op == IO_THREADS_OP_READ);
                 c->flags |= CLIENT_PENDING_COMMAND;
@@ -2442,7 +2443,7 @@ void readQueryFromClient(connection *conn) {
 
     c->lastinteraction = server.unixtime;
     if (c->flags & CLIENT_MASTER) c->read_reploff += nread;
-    atomicIncr(server.stat_net_input_bytes, nread);
+    atomicIncr(server.stat_net_input_bytes, nread); // 多线程访问 stat_net_input_bytes 变量
     if (!(c->flags & CLIENT_MASTER) && sdslen(c->querybuf) > server.client_max_querybuf_len) {
         sds ci = catClientInfoString(sdsempty(),c), bytes = sdsempty();
 
@@ -2456,8 +2457,8 @@ void readQueryFromClient(connection *conn) {
 
     /* There is more data in the client input buffer, continue parsing it
      * and check if there is a full command to execute. */
-     if (processInputBuffer(c) == C_ERR)
-         c = NULL;
+    if (processInputBuffer(c) == C_ERR)
+        c = NULL;
 
 done:
     beforeNextClient(c);
