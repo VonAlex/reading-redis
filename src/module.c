@@ -129,7 +129,7 @@ struct RedisModuleBlockedClient;
 struct RedisModuleCtx {
     void *getapifuncptr;            /* NOTE: Must be the first field. 获取 Module API 的函数 */
     struct RedisModule *module;     /* Module reference. 当前正执行命令的模块，在 RM_Init() 中调用 RM_SetModuleAttribs 赋值 */
-    client *client;                 /* Client calling a command. 当前正执行命令的 client */
+    client *client;                 /* Client calling a command. 当前正执行命令的 client，通过 RedisModuleCommandDispatcher 函数赋值 */
     struct RedisModuleBlockedClient *blocked_client; /* Blocked client for
                                                         thread safe context. */
     struct AutoMemEntry *amqueue;   /* Auto memory queue of objects to free. */
@@ -4124,7 +4124,6 @@ int RM_BlockedClientDisconnected(RedisModuleCtx *ctx) {
  * `RedisModule_Reply*` family of functions to accumulate a reply for when the
  * client will be unblocked. Otherwise the thread safe context will be
  * detached by a specific client.
- * 
  * 如果 bc 不是 NULL，那么该 module 将被绑定到一个 blocked client 上，
  * 并有可能使用`RedisModule_Reply*'系列函数为 client unblocked 时积累 replay。
  * 否则，线程安全上下文将被一个特定的客户端分离。
