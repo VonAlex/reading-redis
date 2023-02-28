@@ -631,7 +631,7 @@ void feedAppendOnlyFile(struct redisCommand *cmd, int dictid, robj **argv, int a
      * of re-entering the event loop, so before the client will get a
      * positive reply about the operation performed. */
     if (server.aof_state == AOF_ON)
-        server.aof_buf = sdscatlen(server.aof_buf,buf,sdslen(buf));
+        server.aof_buf = sdscatlen(server.aof_buf,buf,sdslen(buf)); // rewrite to old aof
 
     /* If a background append only file rewriting is in progress we want to
      * accumulate the differences between the child DB and the current one
