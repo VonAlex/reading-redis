@@ -2369,7 +2369,10 @@ void propagate(struct redisCommand *cmd, int dbid, robj **argv, int argc,
  * The function does not take a reference to the passed 'argv' vector,
  * so it is up to the caller to release the passed argv (but it is usually
  * stack allocated).  The function autoamtically increments ref count of
- * passed objects, so the caller does not need to. */
+ * passed objects, so the caller does not need to. 
+ * 本函数不会引用传过来的 argv 向量，因此需要 caller 释放 argv ( 但是它通常分配在 stack 上 )。
+ * 本函数自动增加 argv 引用，caller 不需要提前做这件事。
+ * */
 void alsoPropagate(struct redisCommand *cmd, int dbid, robj **argv, int argc,
                    int target)
 {

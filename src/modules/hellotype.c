@@ -101,6 +101,7 @@ void HelloTypeReleaseObject(struct HelloTypeObject *o) {
 
 /* HELLOTYPE.INSERT key value */
 int HelloTypeInsert_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    /* 在 moduleFreeContext 时将自动进行内存回收*/
     RedisModule_AutoMemory(ctx); /* Use automatic memory management. */
 
     if (argc != 3) return RedisModule_WrongArity(ctx);

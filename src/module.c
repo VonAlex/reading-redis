@@ -1407,7 +1407,7 @@ void moduleReplicateMultiIfNeeded(RedisModuleCtx *ctx) {
 
 /* Replicate the specified command and arguments to slaves and AOF, as effect
  * of execution of the calling command implementation.
- * 复制特定的命令和参数到 slaves 和 AOF 里，作为调用命令实现执行的影响
+ * 复制特定的命令和参数到 slaves 和 AOF 里，作为调用命令实现执行的影响。
  *
  * The replicated commands are always wrapped into the MULTI/EXEC that
  * contains all the commands replicated in a given module command
@@ -1417,7 +1417,6 @@ void moduleReplicateMultiIfNeeded(RedisModuleCtx *ctx) {
  * 要复制的命令总是包裹在 MULTI/EXEC 中，涵盖在给定 module 命令执行包含的所有命令。
  * 然而，使用 RedisModule_Call() 复制的命令是第一项，
  * 使用 RedisModule_Replicate() 复制的命令将在 EXEC 之前。
- * 
  *
  * Modules should try to use one interface or the other.
  *
@@ -5008,7 +5007,7 @@ void RM_GetRandomHexChars(char *dst, size_t len) {
  * Other modules will be able to use this API by calling the
  * symmetrical function RM_GetSharedAPI() and casting the return value to
  * the right function pointer.
- * 该函数被一个 module 调用，为了以给定的名字到处某些 API。
+ * 当需要以给定的名字导出某些 API 时，module 调用该函数。
  * 其他 module 将可以通过调用对称函数 RM_GetSharedAPI() 来使用该 API，并将返回值转换成正确的函数指针。
  *
  * The function will return REDISMODULE_OK if the name is not already taken,
