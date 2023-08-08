@@ -2338,10 +2338,13 @@ void refreshGoodSlavesCount(void) {
  * The goal of this code is to keep track of scripts already sent to every
  * connected slave, in order to be able to replicate EVALSHA as it is without
  * translating it to EVAL every time it is possible.
+ * 记录已经发送到每个 slave 的脚本，这是为了在 EVALSHA 没有被翻译成 EVAL 的时候同步它。
  *
  * We use a capped collection implemented by a hash table for fast lookup
  * of scripts we can send as EVALSHA, plus a linked list that is used for
  * eviction of the oldest entry when the max number of items is reached.
+ * 为了快速查询我们可以使用 EVALSHA 发送的脚本，
+ * 我们使用哈希表实现了一个有长度限制的集合，外加一个链表，用于 LRU 淘汰。
  *
  * We don't care about taking a different cache for every different slave
  * since to fill the cache again is not very costly, the goal of this code
@@ -2349,20 +2352,35 @@ void refreshGoodSlavesCount(void) {
  * per second wasting bandwidth and processor speed, but it is not a problem
  * if we need to rebuild the cache from scratch from time to time, every used
  * script will need to be transmitted a single time to reappear in the cache.
- *
+ * 我们不关心为每个不同的 slave 使用不同的 cache，因为再次填充 cache 不是一件昂贵的事情。
+ * 这段代码的目的是，避免相同的大脚本每秒传输太多次，浪费带宽和处理速度，
+ * 但如果我们需要不时地从头开始重建 cache，这不是个问题，每个使用的脚本都需要传输一次才能被放到 cache 中。
+ * 
  * This is how the system works:
  *
  * 1) Every time a new slave connects, we flush the whole script cache.
+ * 每当一个新 slave 连上来后，我们都会 flush 整个 script cache。
+ * 
  * 2) We only send as EVALSHA what was sent to the master as EVALSHA, without
  *    trying to convert EVAL into EVALSHA specifically for slaves.
+ * 我们原样给 master 发送 EVALSHA 内容，而不会试图专门为 slave 将 EVAL 转为 EVALSHA。
+ * 
  * 3) Every time we trasmit a script as EVAL to the slaves, we also add the
  *    corresponding SHA1 of the script into the cache as we are sure every
  *    slave knows about the script starting from now.
+ * 每次我们把脚本用 EVAL 传输给 slaves 时，我们也会把脚本相应的 SHA1 值添加到 cache 里，
+ * 因为我们确信从现在起每个 slave 都认识这个脚本（ 因为已经发送过脚本了 ）。
+ * 
  * 4) On SCRIPT FLUSH command, we replicate the command to all the slaves
  *    and at the same time flush the script cache.
+ * 当执行 SCRIPT FLUSH 命令时，我们会把该命令传输给所有的 slave，同时清空本地的脚本 cache。
+ * 
  * 5) When the last slave disconnects, flush the cache.
+ * 当最后一个 slave 断开后，清空缓存。
+ * 
  * 6) We handle SCRIPT LOAD as well since that's how scripts are loaded
  *    in the master sometimes.
+ * 我们也处理 SCRIPT LOAD 命令，因为有时脚本通过这种方式加载到 master。
  */
 
 /* Initialize the script cache, only called at startup. */

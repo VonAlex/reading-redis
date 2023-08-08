@@ -888,7 +888,7 @@ int clientsCronResizeQueryBuffer(client *c) {
          * 1) Pending Query buffer is > LIMIT_PENDING_QUERYBUF.
          * 2) Used length is smaller than pending_querybuf_size/2 */
         size_t pending_querybuf_size = sdsAllocSize(c->pending_querybuf);
-        if(pending_querybuf_size > LIMIT_PENDING_QUERYBUF &&
+        if(pending_querybuf_size > LIMIT_PENDING_QUERYBUF && /* > 4G, 且使用率不到 50% */
            sdslen(c->pending_querybuf) < (pending_querybuf_size/2))
         {
             c->pending_querybuf = sdsRemoveFreeSpace(c->pending_querybuf);
@@ -901,6 +901,8 @@ int clientsCronResizeQueryBuffer(client *c) {
  * of memory in the latest few seconds. This way we can provide such information
  * in the INFO output (clients section), without having to do an O(N) scan for
  * all the clients.
+ * 这个函数用于记录在最近几分钟使用的最大内存的 client。
+ * 用这种方式我们可以在 info 命令 clients 不分输出相关信息，而不用扫描所有的 client。
  *
  * This is how it works. We have an array of CLIENTS_PEAK_MEM_USAGE_SLOTS slots
  * where we track, for each, the biggest client output and input buffers we

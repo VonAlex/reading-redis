@@ -1919,10 +1919,10 @@ typedef struct clusterManagerNode {
     list *flags_str; /* Flags string representations */
     sds replicate;  /* Master ID if node is a slave */
     int dirty;      /* Node has changes that can be flushed */
-    uint8_t slots[CLUSTER_MANAGER_SLOTS];
+    uint8_t slots[CLUSTER_MANAGER_SLOTS]; /* 自己负责的 slot */
     int slots_count;
     int replicas_count;
-    list *friends;
+    list *friends; /* 我的视角看到的其他节点 */
     sds *migrating; /* An array of sds where even strings are slots and odd
                      * strings are the destination node IDs. */
     sds *importing; /* An array of sds where even strings are slots and odd
@@ -3168,6 +3168,7 @@ static void clusterManagerWaitForClusterJoin(void) {
  * If CLUSTER_MANAGER_OPT_GETFRIENDS flag is set into 'opts' argument,
  * and node already knows other nodes, the node's friends list is populated
  * with the other nodes info. */
+/* myself 解析 slot 信息放入 slots 数组，friends 不解析 slot */
 static int clusterManagerNodeLoadInfo(clusterManagerNode *node, int opts,
                                       char **err)
 {
@@ -3178,7 +3179,7 @@ static int clusterManagerNodeLoadInfo(clusterManagerNode *node, int opts,
         success = 0;
         goto cleanup;
     }
-    int getfriends = (opts & CLUSTER_MANAGER_OPT_GETFRIENDS);
+    int getfriends = (opts & CLUSTER_MANAGER_OPT_GETFRIENDS); /* 是否解析我看到的其他节点的信息 */
     char *lines = reply->str, *p, *line;
     while ((p = strstr(lines, "\n")) != NULL) {
         *p = '\0';
@@ -3217,7 +3218,7 @@ static int clusterManagerNodeLoadInfo(clusterManagerNode *node, int opts,
             clusterManagerNodeResetSlots(node);
             if (i == 8) {
                 int remaining = strlen(line);
-                while (remaining > 0) {
+                while (remaining > 0) { /* 有 slot */
                     p = strchr(line, ' ');
                     if (p == NULL) p = line + remaining;
                     remaining -= (p - line);
@@ -3349,7 +3350,7 @@ cleanup:
  * Warning: if something goes wrong, it will free the starting node before
  * returning 0. */
 static int clusterManagerLoadInfoFromNode(clusterManagerNode *node, int opts) {
-    if (node->context == NULL && !clusterManagerNodeConnect(node)) {
+    if (node->context == NULL && !clusterManagerNodeConnect(node)) { /* 如果不存在 link，就创建一个 */
         freeClusterManagerNode(node);
         return 0;
     }
@@ -3378,9 +3379,10 @@ static int clusterManagerLoadInfoFromNode(clusterManagerNode *node, int opts) {
             freeClusterManagerNode((clusterManagerNode *) ln->value);
         listRelease(cluster_manager.nodes);
     }
+
     cluster_manager.nodes = listCreate();
     listAddNodeTail(cluster_manager.nodes, node);
-    if (node->friends != NULL) {
+    if (node->friends != NULL) { /* 从 friends 中获取其他节点 */
         listRewind(node->friends, &li);
         while ((ln = listNext(&li)) != NULL) {
             clusterManagerNode *friend = ln->value;
@@ -3442,6 +3444,7 @@ int clusterManagerCompareNodeBalance(const void *n1, const void *n2) {
     return node1->balance - node2->balance;
 }
 
+/* 生成节点 slot 字符串，不包含迁移中的节点 */
 static sds clusterManagerGetConfigSignature(clusterManagerNode *node) {
     sds signature = NULL;
     int node_count = 0, i = 0, name_len = 0;
@@ -3521,7 +3524,7 @@ static sds clusterManagerGetConfigSignature(clusterManagerNode *node) {
                   clusterManagerSlotCompare);
         }
         signature = sdsempty();
-        for (i = 0; i < node_count; i++) {
+        for (i = 0; i < node_count; i++) { /* slot 用 | 字符拼接 */
             if (i > 0) signature = sdscatprintf(signature, "%c", '|');
             signature = sdscatfmt(signature, "%s", node_configs[i]);
         }
@@ -3902,10 +3905,14 @@ static int clusterManagerFixOpenSlot(int slot) {
     listIter li;
     listNode *ln;
     listRewind(cluster_manager.nodes, &li);
+
+    // 找到 slot x 的 owner
+    // 不负责 slot x，但有它的 key，也算 owner 
     while ((ln = listNext(&li)) != NULL) {
         clusterManagerNode *n = ln->value;
-        if (n->flags & CLUSTER_MANAGER_FLAG_SLAVE) continue;
-        if (n->slots[slot]) listAddNodeTail(owners, n);
+        if (n->flags & CLUSTER_MANAGER_FLAG_SLAVE) continue; /* 跳过 slave */
+
+        if (n->slots[slot]) listAddNodeTail(owners, n); 
         else {
             redisReply *r = CLUSTER_MANAGER_COMMAND(n,
                 "CLUSTER COUNTKEYSINSLOT %d", slot);
@@ -3920,25 +3927,28 @@ static int clusterManagerFixOpenSlot(int slot) {
             if (!success) goto cleanup;
         }
     }
-    if (listLength(owners) == 1) owner = listFirst(owners)->value;
+    if (listLength(owners) == 1) /* 只有一个 owner */
+        owner = listFirst(owners)->value; 
+
     listRewind(cluster_manager.nodes, &li);
     while ((ln = listNext(&li)) != NULL) {
         clusterManagerNode *n = ln->value;
         if (n->flags & CLUSTER_MANAGER_FLAG_SLAVE) continue;
+
         int is_migrating = 0, is_importing = 0;
         if (n->migrating) {
             for (int i = 0; i < n->migrating_count; i += 2) {
                 sds migrating_slot = n->migrating[i];
-                if (atoi(migrating_slot) == slot) {
+                if (atoi(migrating_slot) == slot) { /* n 正在迁出的 slot 正好是 x */
                     char *sep = (listLength(migrating) == 0 ? "" : ",");
-                    migrating_str = sdscatfmt(migrating_str, "%s%s:%u",
-                                              sep, n->ip, n->port);
+                    migrating_str = sdscatfmt(migrating_str, "%s%s:%u", sep, n->ip, n->port);
                     listAddNodeTail(migrating, n);
                     is_migrating = 1;
                     break;
                 }
             }
         }
+        // 对于 n 来说，slot x 不可能既在迁入也在迁出
         if (!is_migrating && n->importing) {
             for (int i = 0; i < n->importing_count; i += 2) {
                 sds importing_slot = n->importing[i];
@@ -3955,17 +3965,16 @@ static int clusterManagerFixOpenSlot(int slot) {
         /* If the node is neither migrating nor importing and it's not
          * the owner, then is added to the importing list in case
          * it has keys in the slot. */
-        if (!is_migrating && !is_importing && n != owner) {
+        //  n 不负责 slot x, 但却有 key, 当做 importing 处理 
+        if (!is_migrating && !is_importing && n != owner) { 
             redisReply *r = CLUSTER_MANAGER_COMMAND(n,
                 "CLUSTER COUNTKEYSINSLOT %d", slot);
             success = clusterManagerCheckRedisReply(n, r, NULL);
             if (success && r->integer > 0) {
                 clusterManagerLogWarn("*** Found keys about slot %d "
-                                      "in node %s:%d!\n", slot, n->ip,
-                                      n->port);
+                                      "in node %s:%d!\n", slot, n->ip, n->port);
                 char *sep = (listLength(importing) == 0 ? "" : ",");
-                importing_str = sdscatfmt(importing_str, "%s%S:%u",
-                                          sep, n->ip, n->port);
+                importing_str = sdscatfmt(importing_str, "%s%S:%u", sep, n->ip, n->port);
                 listAddNodeTail(importing, n);
             }
             if (r) freeReplyObject(r);
@@ -3977,13 +3986,14 @@ static int clusterManagerFixOpenSlot(int slot) {
     if (sdslen(importing_str) > 0)
         printf("Set as importing in: %s\n", importing_str);
     /* If there is no slot owner, set as owner the node with the biggest
-     * number of keys, among the set of migrating / importing nodes. */
-    if (owner == NULL) {
+     * number of keys, among the set of migrating / importing nodes. 
+     * 将含有 slot x 最多 key 的节点设置为 owner */
+    if (owner == NULL) { 
         clusterManagerLogInfo(">>> Nobody claims ownership, "
                               "selecting an owner...\n");
         owner = clusterManagerGetNodeWithMostKeysInSlot(cluster_manager.nodes,
                                                         slot, NULL);
-        // If we still don't have an owner, we can't fix it.
+        // If we still don't have an owner, we can't fix it. 如果仍然没有找到 owner，直接退出
         if (owner == NULL) {
             clusterManagerLogErr("[ERR] Can't select a slot owner. "
                                  "Impossible to fix.\n");
@@ -3994,9 +4004,10 @@ static int clusterManagerFixOpenSlot(int slot) {
         // Use ADDSLOTS to assign the slot.
         clusterManagerLogWarn("*** Configuring %s:%d as the slot owner\n",
                               owner->ip, owner->port);
-        success = clusterManagerClearSlotStatus(owner, slot);
+        success = clusterManagerClearSlotStatus(owner, slot); /* 通过 setslot stable 去掉迁移状态 */
         if (!success) goto cleanup;
-        success = clusterManagerSetSlotOwner(owner, slot, 0);
+
+        success = clusterManagerSetSlotOwner(owner, slot, 0); // 将 slot 分配给 owner
         if (!success) goto cleanup;
         /* Since CLUSTER ADDSLOTS succeeded, we also update the slot
          * info into the node struct, in order to keep it synced */
@@ -4004,7 +4015,7 @@ static int clusterManagerFixOpenSlot(int slot) {
         /* Make sure this information will propagate. Not strictly needed
          * since there is no past owner, so all the other nodes will accept
          * whatever epoch this node will claim the slot with. */
-        success = clusterManagerBumpEpoch(owner);
+        success = clusterManagerBumpEpoch(owner); /* 增大 epoch，以便把路由信息同步到 cluster */
         if (!success) goto cleanup;
         /* Remove the owner from the list of migrating/importing
          * nodes. */
@@ -4015,11 +4026,13 @@ static int clusterManagerFixOpenSlot(int slot) {
      * so that a single node is the owner and all the other nodes
      * are in importing state. Later the fix can be handled by one
      * of the base cases above.
+     * 如果 slot x 有多个 owner，我们需要 fix，
+     * 处理结果是只有一个节点负责它，其他的 owner 变成 importing 状态
      *
      * Note that this case also covers multiple nodes having the slot
      * in migrating state, since migrating is a valid state only for
      * slot owners. */
-    if (listLength(owners) > 1) {
+    if (listLength(owners) > 1) { // owner 数量 > 1 的情况在前面已经给 owner 赋值了，所以这里不可能是 null
         /* Owner cannot be NULL at this point, since if there are more owners,
          * the owner has been set in the previous condition (owner == NULL). */
         assert(owner != NULL);
@@ -4033,7 +4046,7 @@ static int clusterManagerFixOpenSlot(int slot) {
             /* Assign the slot to the owner in the node 'n' configuration.' */
             success = clusterManagerSetSlot(n, owner, slot, "node", NULL);
             if (!success) goto cleanup;
-            success = clusterManagerSetSlot(n, owner, slot, "importing", NULL);
+            success = clusterManagerSetSlot(n, owner, slot, "importing", NULL); // 设置 importing 标识
             if (!success) goto cleanup;
             /* Avoid duplicates. */
             clusterManagerRemoveNodeFromList(importing, n);
@@ -4052,12 +4065,14 @@ static int clusterManagerFixOpenSlot(int slot) {
                               "%s:%d to %s:%d\n", slot,
                               src->ip, src->port, dst->ip, dst->port);
         move_opts |= CLUSTER_MANAGER_OPT_UPDATE;
-        success = clusterManagerMoveSlot(src, dst, slot, move_opts, NULL);
+        success = clusterManagerMoveSlot(src, dst, slot, move_opts, NULL); /* 继续完成 slot 的迁移 */
     }
     /* Case 2: There are multiple nodes that claim the slot as importing,
      * they probably got keys about the slot after a restart so opened
      * the slot. In this case we just move all the keys to the owner
      * according to the configuration. */
+    /* case 2：有多个节点声称 slot 在做 importing，但是没有节点 migrating，
+     * 这很有可能是实例重启导致的。在这种情况下，我们根据配置去完成迁移即可。*/
     else if (listLength(migrating) == 0 && listLength(importing) > 0) {
         clusterManagerLogInfo(">>> Case 2: Moving all the %d slot keys to its "
                               "owner %s:%d\n", slot, owner->ip, owner->port);
@@ -4075,7 +4090,7 @@ static int clusterManagerFixOpenSlot(int slot) {
         }
         /* Since the slot has been moved in "cold" mode, ensure that all the
          * other nodes update their own configuration about the slot itself. */
-        listRewind(cluster_manager.nodes, &li);
+        listRewind(cluster_manager.nodes, &li); /* 通过 setslot mode 更新所有节点的路由 */
         while ((ln = listNext(&li)) != NULL) {
             clusterManagerNode *n = ln->value;
             if (n == owner) continue;
@@ -4115,7 +4130,7 @@ static int clusterManagerFixOpenSlot(int slot) {
             if (count > 0) {
                 try_to_fix = 0;
                 break;
-            }
+            } //  没有 key
             if (strcmp(n->name, target_id) == 0) dst = n;
         }
         if (!try_to_fix) goto unhandled_case;
@@ -4136,7 +4151,7 @@ static int clusterManagerFixOpenSlot(int slot) {
                 success = clusterManagerClearSlotStatus(n, slot);
                 if (!success) goto cleanup;
             }
-        } else {
+        } else { // 在现在的 cluster 拓扑中没有找到迁移目的地节点，那么关闭迁移状态就好
             clusterManagerLogInfo(">>> Case 3: Closing slot %d on both "
                                   "migrating and importing nodes.\n", slot);
             /* Close the slot on both the migrating node and the importing
@@ -4299,7 +4314,7 @@ static int clusterManagerCheckCluster(int quiet) {
             clusterManagerOnError(errstr);
         }
     }
-    if (open_slots != NULL) {
+    if (open_slots != NULL) { /* 有 slot 正在做迁移 */
         result = 0;
         dictIterator *iter = dictGetIterator(open_slots);
         dictEntry *entry;
@@ -4619,7 +4634,7 @@ static int clusterManagerCommandCreate(int argc, char **argv) {
             return 0;
         }
         err = NULL;
-        if (!clusterManagerNodeIsEmpty(node, &err)) {
+        if (!clusterManagerNodeIsEmpty(node, &err)) { /* 已经加入 cluster 的节点会报错退出 */
             clusterManagerPrintNotEmptyNodeError(node, err);
             if (err) zfree(err);
             freeClusterManagerNode(node);
@@ -4627,10 +4642,10 @@ static int clusterManagerCommandCreate(int argc, char **argv) {
         }
         listAddNodeTail(cluster_manager.nodes, node);
     }
-    int node_len = cluster_manager.nodes->len;
+    int node_len = cluster_manager.nodes->len; /* 有多少个节点（ 链表长度 ）*/
     int replicas = config.cluster_manager_command.replicas;
     int masters_count = CLUSTER_MANAGER_MASTERS_COUNT(node_len, replicas);
-    if (masters_count < 3) {
+    if (masters_count < 3) { /* cluster 中至少有 3 个 master */
         clusterManagerLogErr(
             "*** ERROR: Invalid configuration for cluster creation.\n"
             "*** Redis Cluster requires at least 3 master nodes.\n"
@@ -4680,7 +4695,7 @@ static int clusterManagerCommandCreate(int argc, char **argv) {
     clusterManagerNode **masters = interleaved;
     interleaved += masters_count;
     interleaved_len -= masters_count;
-    float slots_per_node = CLUSTER_MANAGER_SLOTS / (float) masters_count;
+    float slots_per_node = CLUSTER_MANAGER_SLOTS / (float) masters_count; /* 每个 master 分配多少个 slot */
     long first = 0;
     float cursor = 0.0f;
     for (i = 0; i < masters_count; i++) {
@@ -4759,7 +4774,10 @@ assign_replicas:
         while ((ln = listNext(&li)) != NULL) {
             clusterManagerNode *node = ln->value;
             char *err = NULL;
-            int flushed = clusterManagerFlushNodeConfig(node, &err);
+
+            /* master 节点的 dirty = 1，进入该函数后 addslots，
+             * slave 节点 dirty = 0，进入该函数后什么也不做就退出 */
+            int flushed = clusterManagerFlushNodeConfig(node, &err); 
             if (!flushed && node->dirty && !node->replicate) {
                 if (err != NULL) {
                     CLUSTER_MANAGER_PRINT_REPLY_ERROR(node, err);
@@ -4989,20 +5007,20 @@ static int clusterManagerCommandDeleteNode(int argc, char **argv) {
     listRewind(cluster_manager.nodes, &li);
     while ((ln = listNext(&li)) != NULL) {
         clusterManagerNode *n = ln->value;
-        if (n == node) continue;
-        if (n->replicate && !strcasecmp(n->replicate, node_id)) {
+        if (n == node) continue; /* 要删除的节点 */
+        if (n->replicate && !strcasecmp(n->replicate, node_id)) { /* 要删除节点的 slave */
             // Reconfigure the slave to replicate with some other node
-            clusterManagerNode *master = clusterManagerNodeWithLeastReplicas();
+            clusterManagerNode *master = clusterManagerNodeWithLeastReplicas(); /* 找到集群中 replica 数量最少的 master */
             assert(master != NULL);
             clusterManagerLogInfo(">>> %s:%d as replica of %s:%d\n",
                                   n->ip, n->port, master->ip, master->port);
-            redisReply *r = CLUSTER_MANAGER_COMMAND(n, "CLUSTER REPLICATE %s",
+            redisReply *r = CLUSTER_MANAGER_COMMAND(n, "CLUSTER REPLICATE %s", /* slave 更改 master */
                                                     master->name);
             success = clusterManagerCheckRedisReply(n, r, NULL);
             if (r) freeReplyObject(r);
             if (!success) return 0;
         }
-        redisReply *r = CLUSTER_MANAGER_COMMAND(n, "CLUSTER FORGET %s",
+        redisReply *r = CLUSTER_MANAGER_COMMAND(n, "CLUSTER FORGET %s", /* 其他节点执行 cluster forget */
                                                 node_id);
         success = clusterManagerCheckRedisReply(n, r, NULL);
         if (r) freeReplyObject(r);
@@ -5011,7 +5029,7 @@ static int clusterManagerCommandDeleteNode(int argc, char **argv) {
 
     // Finally shutdown the node
     clusterManagerLogInfo(">>> SHUTDOWN the node.\n");
-    redisReply *r = redisCommand(node->context, "SHUTDOWN");
+    redisReply *r = redisCommand(node->context, "SHUTDOWN"); /* shutdown 要下掉的节点 */
     success = clusterManagerCheckRedisReply(node, r, NULL);
     if (r) freeReplyObject(r);
     return success;

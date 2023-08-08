@@ -1272,8 +1272,10 @@ struct redisServer {
     int lua_write_dirty;  /* True if a write command was called during the
                              execution of the current script. */
     int lua_random_dirty; /* True if a random command was called during the
-                             execution of the current script. */
-    int lua_replicate_commands; /* True if we are doing single commands repl. */
+                             execution of the current script. 
+                             当前脚本的执行过程中，如果调用了一个 random 命令，就会置为 true */
+    int lua_replicate_commands; /* True if we are doing single commands repl. 
+                                   如果我们做单个命令的 repl，置为 true */
     int lua_multi_emitted;/* True if we already proagated MULTI. */
     int lua_repl;         /* Script replication flags for redis.set_repl(). */
     int lua_timedout;     /* True if we reached the time limit for script

@@ -552,7 +552,9 @@ int luaRedisGenericCommand(lua_State *lua, int raise_error) {
 
     /* If we are using single commands replication, we need to wrap what
      * we propagate into a MULTI/EXEC block, so that it will be atomic like
-     * a Lua script in the context of AOF and slaves. */
+     * a Lua script in the context of AOF and slaves. 
+     * 如果我们正在使用单命令同步，我们需要把要同步的命令包裹在 MULTI/EXEC 之内，
+     * 以此来保证在 AOF and slaves 的上下文中像 Lua 那种作为原子性执行 */
     if (server.lua_replicate_commands &&
         !server.lua_multi_emitted &&
         !(server.lua_caller->flags & CLIENT_MULTI) &&
@@ -840,14 +842,14 @@ LUALIB_API int (luaopen_cmsgpack) (lua_State *L);
 LUALIB_API int (luaopen_bit) (lua_State *L);
 
 void luaLoadLibraries(lua_State *lua) {
-    luaLoadLib(lua, "", luaopen_base);
-    luaLoadLib(lua, LUA_TABLIBNAME, luaopen_table);
-    luaLoadLib(lua, LUA_STRLIBNAME, luaopen_string);
-    luaLoadLib(lua, LUA_MATHLIBNAME, luaopen_math);
-    luaLoadLib(lua, LUA_DBLIBNAME, luaopen_debug);
-    luaLoadLib(lua, "cjson", luaopen_cjson);
-    luaLoadLib(lua, "struct", luaopen_struct);
-    luaLoadLib(lua, "cmsgpack", luaopen_cmsgpack);
+    luaLoadLib(lua, "", luaopen_base); // 基础库，包含了 Lua 核心函数
+    luaLoadLib(lua, LUA_TABLIBNAME, luaopen_table); // 表格库，用于处理表格的通用函数
+    luaLoadLib(lua, LUA_STRLIBNAME, luaopen_string); // 字符串库
+    luaLoadLib(lua, LUA_MATHLIBNAME, luaopen_math); // 标准 C 语言数学库的接口
+    luaLoadLib(lua, LUA_DBLIBNAME, luaopen_debug); // 调试库
+    luaLoadLib(lua, "cjson", luaopen_cjson); // 用于处理 JSON 对象的 cjson 库
+    luaLoadLib(lua, "struct", luaopen_struct); // 在 Lua 值和 C struct 之间进行转换的 struct 库
+    luaLoadLib(lua, "cmsgpack", luaopen_cmsgpack); // 处理 MessagePack 数据的 cmsgpack 库
     luaLoadLib(lua, "bit", luaopen_bit);
 
 #if 0 /* Stuff that we don't load currently, for sandboxing concerns. */
@@ -914,8 +916,11 @@ void scriptingEnableGlobalsProtection(lua_State *lua) {
  * in order to reset the Lua scripting environment.
  *
  * However it is simpler to just call scriptingReset() that does just that. */
+
+// 为了让 Lua 环境符合 Redis 脚本功能的需求，
+// Redis 对 Lua 环境进行了一系列的修改，包括添加函数库、更换随机函数、保护全局变量，等等。
 void scriptingInit(int setup) {
-    lua_State *lua = lua_open();
+    lua_State *lua = lua_open(); // 创建一个基本的 Lua 环境，下面需要改造以满足 redis 需求
 
     if (setup) {
         server.lua_client = NULL;
@@ -924,22 +929,24 @@ void scriptingInit(int setup) {
         ldbInit();
     }
 
-    luaLoadLibraries(lua);
-    luaRemoveUnsupportedFunctions(lua);
+    luaLoadLibraries(lua); // 载入指定的 Lua 函数库
+    luaRemoveUnsupportedFunctions(lua); // 屏蔽一些可能对 Lua 环境产生安全问题的函数
 
     /* Initialize a dictionary we use to map SHAs to scripts.
      * This is useful for replication, as we need to replicate EVALSHA
      * as EVAL, so we need to remember the associated script. */
+    // map SHAs -> scripts
+    // 在主从复制时很有用，因为我们需要把 EVALSHA 作为 EVAL 同步，因此我们需要记住与之相关的脚本
     server.lua_scripts = dictCreate(&shaScriptObjectDictType,NULL);
     server.lua_scripts_mem = 0;
 
     /* Register the redis commands table and fields */
-    lua_newtable(lua);
+    lua_newtable(lua); // 创建一张空表，并将其压栈，放在栈顶。
 
     /* redis.call */
-    lua_pushstring(lua,"call");
-    lua_pushcfunction(lua,luaRedisCallCommand);
-    lua_settable(lua,-3);
+    lua_pushstring(lua,"call"); // 压入key
+    lua_pushcfunction(lua,luaRedisCallCommand); // 压入value
+    lua_settable(lua,-3); // //弹出key,value，并设置到 table 里面去
 
     /* redis.pcall */
     lua_pushstring(lua,"pcall");
@@ -1021,10 +1028,13 @@ void scriptingInit(int setup) {
     lua_settable(lua,-3);
 
     /* Finally set the table as 'redis' global var. */
-    lua_setglobal(lua,"redis");
+    lua_setglobal(lua,"redis"); // 将栈顶元素 table 赋值给 'redis' 变量
 
+    // 为了保证相同的脚本可以在不同的机器上产生相同的结果，
+    // Redis 要求所有传入服务器的 Lua 脚本，以及 Lua 环境中的所有函数，都必须是无副作用（side effect）的纯函数（pure func-tion）。
+    // 副作用是指：函数使用时除了返回值以外还破坏了系统环境，比如全局变量。
     /* Replace math.random and math.randomseed with our implementations. */
-    lua_getglobal(lua,"math");
+    lua_getglobal(lua,"math"); //  从 lua 脚本中获取 'math' 的变量，放到栈顶
 
     lua_pushstring(lua,"random");
     lua_pushcfunction(lua,redis_math_random);
@@ -1038,12 +1048,18 @@ void scriptingInit(int setup) {
 
     /* Add a helper function that we use to sort the multi bulk output of non
      * deterministic commands, when containing 'false' elements. */
+    // 另一个可能产生不一致数据的地方是那些带有不确定性质的命令,
+    // 比如对于一个集合 key 来说，因为集合元素的排列是无序的，所以即使两个集合的元素完全相同，它们的输出结果也可能并不相同。
+    // 为了消除这些命令带来的不确定性, 为 Lua 环境创建一个排序辅助函数
+    // 当 Lua 脚本执行完一个带有不确定性的命令之后，
+    // 程序会使用 __redis__compare_helper 作为对比函数自动调用 table.sort 函数对命令的返回值做一次排序，以此来保证相同的数据集总是产生相同的输出。
     {
         char *compare_func =    "function __redis__compare_helper(a,b)\n"
                                 "  if a == false then a = '' end\n"
                                 "  if b == false then b = '' end\n"
                                 "  return a<b\n"
                                 "end\n";
+        // 调用luaL_loadbuffer来编译用户的输入，如果编译没有错误，此调用会向栈中压入编译好的程序块
         luaL_loadbuffer(lua,compare_func,strlen(compare_func),"@cmp_func_def");
         lua_pcall(lua,0,0,0);
     }
@@ -1074,6 +1090,8 @@ void scriptingInit(int setup) {
      * Note: there is no need to create it again when this function is called
      * by scriptingReset(). */
     if (server.lua_client == NULL) {
+        // 因为 Redis 命令必须通过客户端来执行，
+        // 所以需要在服务器状态中创建一个无网络连接的伪客户端
         server.lua_client = createClient(-1);
         server.lua_client->flags |= CLIENT_LUA;
     }
@@ -1081,9 +1099,12 @@ void scriptingInit(int setup) {
     /* Lua beginners often don't use "local", this is likely to introduce
      * subtle bugs in their code. To prevent problems we protect accesses
      * to global variables. */
+    // lua 初学者通常不使用 local 关键字，这可能会在他们的代码中引入微妙的错误。
+    // 为了防止问题，我们保护对全局变量的访问。
+    // 确保传入服务器的脚本不会因为忘记使用 local 关键字而将额外的全局变量添加到 Lua 环境
     scriptingEnableGlobalsProtection(lua);
 
-    server.lua = lua;
+    server.lua = lua; // 将 lua 环境保存到 server 里
 }
 
 /* Release resources related to Lua scripting.
@@ -1118,10 +1139,13 @@ void luaSetGlobalArray(lua_State *lua, char *var, robj **elev, int elec) {
 
 /* We replace math.random() with our implementation that is not affected
  * by specific libc random() implementations and will output the same sequence
- * (for the same seed) in every arch. */
+ * (for the same seed) in every arch.
+ * 把 math.random() 替换为我们自己的实现，不会被特定 libc random() 实现所影响，
+ * 在每一种架构下将输出相同的序列。 */
 
 /* The following implementation is the one shipped with Lua itself but with
- * rand() replaced by redisLrand48(). */
+ * rand() replaced by redisLrand48().
+ * 以下函数是 Lua 本身附带的，但 rand() 被替换为 redisLrand48()。*/
 int redis_math_random (lua_State *L) {
   /* the `%' avoids the (rare) case of r==1, and is needed also because on
      some systems (SunOS!) `rand()' may return a value larger than RAND_MAX */
@@ -1159,9 +1183,10 @@ int redis_math_randomseed (lua_State *L) {
  * EVAL and SCRIPT commands implementation
  * ------------------------------------------------------------------------- */
 
-/* Define a Lua function with the specified body.
+/* Define a Lua function with the specified body. 
+ * 使用特定的内容创建一个 Lua 函数。
  * The function name will be generated in the following form:
- *
+ * 函数名为 f_<hex sha1 sum>
  *   f_<hex sha1 sum>
  *
  * The function increments the reference count of the 'body' object as a
@@ -1182,7 +1207,7 @@ sds luaCreateFunction(client *c, lua_State *lua, robj *body) {
 
     funcname[0] = 'f';
     funcname[1] = '_';
-    sha1hex(funcname+2,body->ptr,sdslen(body->ptr));
+    sha1hex(funcname+2,body->ptr,sdslen(body->ptr)); // 计算 lua 脚本 sha1 值，长度为 40
 
     sds sha = sdsnewlen(funcname+2,40);
     if ((de = dictFind(server.lua_scripts,sha)) != NULL) {
@@ -1191,6 +1216,9 @@ sds luaCreateFunction(client *c, lua_State *lua, robj *body) {
     }
 
     sds funcdef = sdsempty();
+    // function <funcname>()
+    //          <body>
+    // end
     funcdef = sdscat(funcdef,"function ");
     funcdef = sdscatlen(funcdef,funcname,42);
     funcdef = sdscatlen(funcdef,"() ",3);
@@ -1203,7 +1231,7 @@ sds luaCreateFunction(client *c, lua_State *lua, robj *body) {
                 "Error compiling script (new function): %s\n",
                 lua_tostring(lua,-1));
         }
-        lua_pop(lua,1);
+        lua_pop(lua,1); // 如果加载脚本有问题，推出堆栈，释放内存
         sdsfree(sha);
         sdsfree(funcdef);
         return NULL;
@@ -1272,10 +1300,14 @@ void evalGenericCommand(client *c, int evalsha) {
      * SRANDMEMBER or RANDOMKEY from Lua scripts as far as no write command
      * is called (otherwise the replication and AOF would end with non
      * deterministic sequences).
+     * 我们设置这个标识置为 0，表示到目前为止没有 random 命令被调用。
+     * 
+     * 通过这种方式，我们可以允许用户从 Lua 脚本中调用像 SRANDMEMBER or RANDOMKEY 这样的命令，
+     * 因为到目前为止没有 write 命令被调用。否则复制和 AOF 中将会含有不确定的数据序。
      *
      * Thanks to this flag we'll raise an error every time a write command
-     * is called after a random command was used. 
-     * 这个 flag 用于标识，每次在随机命令执行后，再执行 write 命令会报错 */
+     * is called after a random command was used.
+     * 通过这个标识，当我们可以在一个 random 命令后使用 write 命令，将会报错 */
     server.lua_random_dirty = 0;
     server.lua_write_dirty = 0;
     server.lua_replicate_commands = server.lua_always_replicate_commands;
@@ -1343,6 +1375,7 @@ void evalGenericCommand(client *c, int evalsha) {
 
     /* Populate the argv and keys table accordingly to the arguments that
      * EVAL received. */
+    // 将 EVAL 命令中输入的 KEYS/ARGV 参数以全局数组的方式传入到 Lua 环境中
     luaSetGlobalArray(lua,"KEYS",c->argv+3,numkeys);
     luaSetGlobalArray(lua,"ARGV",c->argv+3+numkeys,c->argc-3-numkeys);
 
@@ -1370,7 +1403,7 @@ void evalGenericCommand(client *c, int evalsha) {
     /* At this point whether this script was never seen before or if it was
      * already defined, we can call it. We have zero arguments and expect
      * a single return value. */
-    err = lua_pcall(lua,0,1,-2);
+    err = lua_pcall(lua,0,1,-2); // 执行脚本对应的 Lua 函数
 
     /* Perform some cleanup that we need to do both on error and success. */
     if (delhook) lua_sethook(lua,NULL,0,0); /* Disable hook */
@@ -1412,9 +1445,7 @@ void evalGenericCommand(client *c, int evalsha) {
         lua_pop(lua,1); /* Remove the error handler. */
     }
 
-    /* If we are using single commands replication,
-     * emit EXEC if there was at least a write.
-     * 如果我们想要同步单个命令，如果至少有一个 write，需要执行 EXEC */
+    /* If we are using single commands replication, emit EXEC if there was at least a write. */
     if (server.lua_replicate_commands) {
         preventCommandPropagation(c);
         if (server.lua_multi_emitted) {
@@ -1457,7 +1488,7 @@ void evalGenericCommand(client *c, int evalsha) {
              * just to replicate it as SCRIPT LOAD, otherwise we risk running
              * an aborted script on slaves (that may then produce results there)
              * or just running a CPU costly read-only script on the slaves.
-             * 如果脚本没有对 dataset 产生任何变化，我们仅作为 SCRIPT LOAD 同步 */
+             * 如果脚本没有对 dataset 产生任何改变，我们仅作为 SCRIPT LOAD 同步 */
             if (server.dirty == initial_server_dirty) {
                 rewriteClientCommandVector(c,3,
                     resetRefCount(createStringObject("SCRIPT",6)),
