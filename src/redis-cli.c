@@ -1908,7 +1908,7 @@ static struct clusterManager {
 dict *clusterManagerUncoveredSlots = NULL;
 
 typedef struct clusterManagerNode {
-    redisContext *context;
+    redisContext *context; // hiredis redisConnect 
     sds name;
     char *ip;
     int port;
@@ -1922,7 +1922,7 @@ typedef struct clusterManagerNode {
     uint8_t slots[CLUSTER_MANAGER_SLOTS]; /* 自己负责的 slot */
     int slots_count;
     int replicas_count;
-    list *friends; /* 我的视角看到的其他节点 */
+    list *friends; /* 我看到的其他节点 */
     sds *migrating; /* An array of sds where even strings are slots and odd
                      * strings are the destination node IDs. */
     sds *importing; /* An array of sds where even strings are slots and odd
@@ -2260,7 +2260,7 @@ cleanup:
 
 static int clusterManagerNodeConnect(clusterManagerNode *node) {
     if (node->context) redisFree(node->context);
-    node->context = redisConnect(node->ip, node->port);
+    node->context = redisConnect(node->ip, node->port); // connect node
     if (node->context->err) {
         fprintf(stderr,"Could not connect to Redis at ");
         fprintf(stderr,"%s:%d: %s\n", node->ip, node->port,
@@ -3181,7 +3181,7 @@ static int clusterManagerNodeLoadInfo(clusterManagerNode *node, int opts,
     }
     int getfriends = (opts & CLUSTER_MANAGER_OPT_GETFRIENDS); /* 是否解析我看到的其他节点的信息 */
     char *lines = reply->str, *p, *line;
-    while ((p = strstr(lines, "\n")) != NULL) {
+    while ((p = strstr(lines, "\n")) != NULL) { // 逐行解析 cluster nodes reply
         *p = '\0';
         line = lines;
         lines = p + 1;
@@ -3350,13 +3350,13 @@ cleanup:
  * Warning: if something goes wrong, it will free the starting node before
  * returning 0. */
 static int clusterManagerLoadInfoFromNode(clusterManagerNode *node, int opts) {
-    if (node->context == NULL && !clusterManagerNodeConnect(node)) { /* 如果不存在 link，就创建一个 */
+    if (node->context == NULL && !clusterManagerNodeConnect(node)) { 
         freeClusterManagerNode(node);
         return 0;
     }
     opts |= CLUSTER_MANAGER_OPT_GETFRIENDS;
     char *e = NULL;
-    if (!clusterManagerNodeIsCluster(node, &e)) {
+    if (!clusterManagerNodeIsCluster(node, &e)) { // 检查是否是集群节点
         clusterManagerPrintNotClusterNodeError(node, e);
         if (e) zfree(e);
         freeClusterManagerNode(node);
@@ -5056,7 +5056,7 @@ static int clusterManagerCommandCheck(int argc, char **argv) {
     char *ip = NULL;
     if (!getClusterHostFromCmdArgs(argc, argv, &ip, &port)) goto invalid_args;
     clusterManagerNode *node = clusterManagerNewNode(ip, port);
-    if (!clusterManagerLoadInfoFromNode(node, 0)) return 0;
+    if (!clusterManagerLoadInfoFromNode(node, 0)) return 0; // 根据传入的ip和port，获取节点信息
     clusterManagerShowClusterInfo();
     return clusterManagerCheckCluster(0);
 invalid_args:
@@ -6578,7 +6578,7 @@ static void getKeyFreqs(redisReply *keys, unsigned long long *freqs) {
 }
 
 #define HOTKEYS_SAMPLE 16
-static void findHotKeys(void) {
+static void findHotKeys(void) { // 扫描出 freq 最高的 16 个 key
     redisReply *keys, *reply;
     unsigned long long counters[HOTKEYS_SAMPLE] = {0};
     sds hotkeys[HOTKEYS_SAMPLE] = {NULL};
@@ -6627,14 +6627,14 @@ static void findHotKeys(void) {
 
             /* Use eviction pool here */
             k = 0;
-            while (k < HOTKEYS_SAMPLE && freqs[i] > counters[k]) k++;
-            if (k == 0) continue;
+            while (k < HOTKEYS_SAMPLE && freqs[i] > counters[k]) k++; // 为 freqs[i] 在 counters 数组中找到位置
+            if (k == 0) continue; // 如果 freqs[i] 比 counters 数组中任意元素都小，就不统计它了
             k--;
             if (k == 0 || counters[k] == 0) {
                 sdsfree(hotkeys[k]);
             } else {
                 sdsfree(hotkeys[0]);
-                memmove(counters,counters+1,sizeof(counters[0])*k);
+                memmove(counters,counters+1,sizeof(counters[0])*k); // 移动数组元素，空出 k 位置的元素
                 memmove(hotkeys,hotkeys+1,sizeof(hotkeys[0])*k);
             }
             counters[k] = freqs[i];

@@ -1011,7 +1011,7 @@ void clientsCron(void) {
 void databasesCron(void) {
     /* Expire keys by random sampling. Not required for slaves
      * as master will synthesize DELs for us. */
-    if (server.active_expire_enabled) {
+    if (server.active_expire_enabled) { // 主从有别
         if (server.masterhost == NULL) {
             activeExpireCycle(ACTIVE_EXPIRE_CYCLE_SLOW);
         } else {

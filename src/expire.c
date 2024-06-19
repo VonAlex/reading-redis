@@ -133,6 +133,9 @@ void activeExpireCycle(int type) {
      * per iteration. Since this function gets called with a frequency of
      * server.hz times per second, the following is the max amount of
      * microseconds we can spend in this function. */
+    // 25 / 100 = 25 %
+    // cron 函数 1s 执行 server.hz 次，那么每秒执行时间为 1000000 / hz 微秒
+    // 计算结果是 cron 的 25 %
     timelimit = 1000000*ACTIVE_EXPIRE_CYCLE_SLOW_TIME_PERC/server.hz/100;
     timelimit_exit = 0;
     if (timelimit <= 0) timelimit = 1;
@@ -245,22 +248,30 @@ void activeExpireCycle(int type) {
 
 /*-----------------------------------------------------------------------------
  * Expires of keys created in writable slaves
+ * 在可写 slave 上创建的 expire dict
  *
  * Normally slaves do not process expires: they wait the masters to synthesize
  * DEL operations in order to retain consistency. However writable slaves are
  * an exception: if a key is created in the slave and an expire is assigned
  * to it, we need a way to expire such a key, since the master does not know
  * anything about such a key.
+ * 正常情况下，slave 不执行过期逻辑，为了保持一致性，它们仅从 master 等待同步的 DEL 操作。
+ * 然而，可写 slave 是一个例外：如过 1 个 key 创建在 slave 上，并指定了一个 expire，我们需要一种方式来过期这类 key，
+ * 因为 master 感知不到这个 key。
  *
  * In order to do so, we track keys created in the slave side with an expire
  * set, and call the expireSlaveKeys() function from time to time in order to
  * reclaim the keys if they already expired.
+ * 为了达成上述目的，我们使用一个 expire set 来跟踪创建在 slave 侧的 key，并定时调用
+ * expireSlaveKeys() 函数来回收那已经些过期的 key。
  *
  * Note that the use case we are trying to cover here, is a popular one where
  * slaves are put in writable mode in order to compute slow operations in
  * the slave side that are mostly useful to actually read data in a more
  * processed way. Think at sets intersections in a tmp key, with an expire so
  * that it is also used as a cache to avoid intersecting every time.
+ * 注意，我们这里要处理的 case，是一种常用的用法，即，为了处理一些 slow 操作，把 slave 置为可写模式。
+ * 可以考虑使用集合的交集来生成一个临时键，并为该键设置过期时间，使其可充当缓存,以避免每次都计算交集。
  *
  * This implementation is currently not perfect but a lot better than leaking
  * the keys as implemented in 3.2.
@@ -271,17 +282,23 @@ void activeExpireCycle(int type) {
  * don't even care to initialize the database at startup. We'll do it once
  * the feature is used the first time, that is, when rememberSlaveKeyWithExpire()
  * is called.
+ * 使用 dict 来记录我们可能先要从 slave 过期掉的 keyname 以及其所属的 dbid。
+ * 因为这个函数不经常使用，因此我们在 startup 时不进行初始化。
+ * 当第一次调用 rememberSlaveKeyWithExpire() 函数的时候，我们将初始化
  *
  * The dictionary has an SDS string representing the key as the hash table
  * key, while the value is a 64 bit unsigned integer with the bits corresponding
  * to the DB where the keys may exist set to 1. Currently the keys created
  * with a DB id > 63 are not expired, but a trivial fix is to set the bitmap
  * to the max 64 bit unsigned value when we know there is a key with a DB
- * ID greater than 63, and check all the configured DBs in such a case. */
+ * ID greater than 63, and check all the configured DBs in such a case.
+ * dict 的 key 使用的是 SDS 字符串，value 是一个 64 位无符号整数，该整数的二进制表示 key 可能存在的 dbid，该位置 1 （ 实际上就是个 bitmap ）。
+ * dbid > 64 的 key 不会过期，但是可以简单修复,当知道存在 dbid > 63 的 key 时,将 bitmap 设为最大 64 位无符号值,并在这种情况下检查所有已配置的 DB。
+ *  */
 dict *slaveKeysWithExpire = NULL;
 
 /* Check the set of keys created by the master with an expire set in order to
- * check if they should be evicted. */
+ * check if they should be evicted.  */
 void expireSlaveKeys(void) {
     if (slaveKeysWithExpire == NULL ||
         dictSize(slaveKeysWithExpire) == 0) return;
@@ -298,7 +315,7 @@ void expireSlaveKeys(void) {
          * bits set in the value bitmap. */
         int dbid = 0;
         while(dbids && dbid < server.dbnum) {
-            if ((dbids & 1) != 0) {
+            if ((dbids & 1) != 0) { // 找到 key 所属的 db
                 redisDb *db = server.db+dbid;
                 dictEntry *expire = dictFind(db->expires,keyname);
                 int expired = 0;
@@ -313,7 +330,7 @@ void expireSlaveKeys(void) {
                  * corresponding bit in the new bitmap we set as value.
                  * At the end of the loop if the bitmap is zero, it means we
                  * no longer need to keep track of this key. */
-                if (expire && !expired) {
+                if (expire && !expired) { // 有 ttl 但是还没过期
                     noexpire++;
                     new_dbids |= (uint64_t)1 << dbid;
                 }
@@ -333,9 +350,9 @@ void expireSlaveKeys(void) {
         /* Stop conditions: found 3 keys we cna't expire in a row or
          * time limit was reached. */
         cycles++;
-        if (noexpire > 3) break;
-        if ((cycles % 64) == 0 && mstime()-start > 1) break;
-        if (dictSize(slaveKeysWithExpire) == 0) break;
+        if (noexpire > 3) break; // 1）发现三个没有过期的 key
+        if ((cycles % 64) == 0 && mstime()-start > 1) break; // 2) 运行时间超过 1ms 且超过 64 cycle
+        if (dictSize(slaveKeysWithExpire) == 0) break; // 3) 没有要处理的过期 key
     }
 }
 
