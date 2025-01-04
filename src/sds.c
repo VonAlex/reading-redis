@@ -86,6 +86,7 @@ static inline char sdsReqType(size_t string_size) {
  * You can print the string with printf() as there is an implicit \0 at the
  * end of the string. However the string is binary safe and can contain
  * \0 characters in the middle, as the length is stored in the sds header. */
+// sdsnewlen(0, "") 会创建一个 SDS_TYPE_8  sds
 sds sdsnewlen(const void *init, size_t initlen) {
     void *sh;
     sds s;
@@ -103,7 +104,7 @@ sds sdsnewlen(const void *init, size_t initlen) {
     else if (!init)
         memset(sh, 0, hdrlen+initlen+1);
     if (sh == NULL) return NULL;
-    s = (char*)sh+hdrlen;
+    s = (char*)sh+hdrlen; // 指向 buf
     fp = ((unsigned char*)s)-1;
     switch(type) {
         case SDS_TYPE_5: {
@@ -140,9 +141,9 @@ sds sdsnewlen(const void *init, size_t initlen) {
         }
     }
     if (initlen && init)
-        memcpy(s, init, initlen);
+        memcpy(s, init, initlen); // 复制 init 字符串到 sds->buf 中
     s[initlen] = '\0';
-    return s;
+    return s; // 注意: 这里返回的是 sds->buf 的首地址,而不是 sds 的首地址
 }
 
 /* Create an empty (zero length) sds string. Even in this case the string
@@ -202,6 +203,8 @@ void sdsclear(sds s) {
  *
  * Note: this does not change the *length* of the sds string as returned
  * by sdslen(), but only the free buffer space we have. */
+// sdsMakeRoomFor() 函数用于扩展 sds 字符串的空闲空间，
+// 以便在字符串末尾写入 addlen 个字节，并确保字符串以空字符结尾。
 sds sdsMakeRoomFor(sds s, size_t addlen) {
     void *sh, *newsh;
     size_t avail = sdsavail(s);
@@ -333,6 +336,8 @@ void *sdsAllocPtr(sds s) {
  * ... check for nread <= 0 and handle it ...
  * sdsIncrLen(s, nread);
  */
+// 用于调整 sds 字符串的长度，增加或减少指定的字节数.
+// 比如 sds 末尾某些字节不需要, 可以调用该函数,后续再使用 sds 时就可以覆盖掉不要的字节了
 void sdsIncrLen(sds s, ssize_t incr) {
     unsigned char flags = s[-1];
     size_t len;
@@ -426,6 +431,7 @@ sds sdscatsds(sds s, const sds t) {
 
 /* Destructively modify the sds string 's' to hold the specified binary
  * safe string pointed by 't' of length 'len' bytes. */
+// 破坏性地修改sds字符串's'，使其包含由't'指向的长度为'len'字节的二进制安全字符串。
 sds sdscpylen(sds s, const char *t, size_t len) {
     if (sdsalloc(s) < len) {
         s = sdsMakeRoomFor(s,len-sdslen(s));

@@ -944,9 +944,11 @@ void scriptingInit(int setup) {
     lua_newtable(lua); // 创建一张空表，并将其压栈，放在栈顶。
 
     /* redis.call */
-    lua_pushstring(lua,"call"); // 压入key
-    lua_pushcfunction(lua,luaRedisCallCommand); // 压入value
-    lua_settable(lua,-3); // //弹出key,value，并设置到 table 里面去
+    lua_pushstring(lua,"call"); // 压入 key
+    lua_pushcfunction(lua,luaRedisCallCommand); // 压入 value
+    // lua_settable 函数作一个等价于 t[k] = v 的操作, 其中 t 是一个给定有效索引 index 处的值,此处 index 为 -3,所以 t 为栈顶的 table,
+    // v 指栈顶的值， 而 k 是栈顶之下的那个值, 此处的 v 为 luaRedisCallCommand, k 为 "call"
+    lua_settable(lua,-3); // 弹出 key,value，并设置到 table 里面去
 
     /* redis.pcall */
     lua_pushstring(lua,"pcall");
@@ -983,6 +985,7 @@ void scriptingInit(int setup) {
     lua_pushstring(lua, "error_reply");
     lua_pushcfunction(lua, luaRedisErrorReplyCommand);
     lua_settable(lua, -3);
+
     lua_pushstring(lua, "status_reply");
     lua_pushcfunction(lua, luaRedisStatusReplyCommand);
     lua_settable(lua, -3);
@@ -1025,7 +1028,7 @@ void scriptingInit(int setup) {
     /* redis.debug */
     lua_pushstring(lua,"debug");
     lua_pushcfunction(lua,luaRedisDebugCommand);
-    lua_settable(lua,-3);
+    lua_settable(lua,-3); // 弹出 "debug" 和 luaRedisDebugCommand，现在栈顶是 table
 
     /* Finally set the table as 'redis' global var. */
     lua_setglobal(lua,"redis"); // 将栈顶元素 table 赋值给 'redis' 变量
@@ -1090,8 +1093,7 @@ void scriptingInit(int setup) {
      * Note: there is no need to create it again when this function is called
      * by scriptingReset(). */
     if (server.lua_client == NULL) {
-        // 因为 Redis 命令必须通过客户端来执行，
-        // 所以需要在服务器状态中创建一个无网络连接的伪客户端
+        // Redis 命令必须通过客户端来执行，这里需要在服务器状态中创建一个伪客户端
         server.lua_client = createClient(-1);
         server.lua_client->flags |= CLIENT_LUA;
     }
@@ -1104,7 +1106,7 @@ void scriptingInit(int setup) {
     // 确保传入服务器的脚本不会因为忘记使用 local 关键字而将额外的全局变量添加到 Lua 环境
     scriptingEnableGlobalsProtection(lua);
 
-    server.lua = lua; // 将 lua 环境保存到 server 里
+    server.lua = lua;
 }
 
 /* Release resources related to Lua scripting.

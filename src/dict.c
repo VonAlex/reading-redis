@@ -152,7 +152,7 @@ int dictExpand(dict *d, unsigned long size)
         return DICT_ERR;
 
     dictht n; /* the new hash table */
-    unsigned long realsize = _dictNextPower(size);
+    unsigned long realsize = _dictNextPower(size); // 计算扩展或缩放新哈希表的大小
 
     /* Rehashing to the same table size is not useful. */
     if (realsize == d->ht[0].size) return DICT_ERR;
@@ -171,6 +171,7 @@ int dictExpand(dict *d, unsigned long size)
     }
 
     /* Prepare a second hash table for incremental rehashing */
+    /* 如果ht[0]不为空，则初始化ht[1]为当前键值对的哈希表，并开启渐进式rehash模式 */ 
     d->ht[1] = n;
     d->rehashidx = 0;
     return DICT_OK;
@@ -260,14 +261,27 @@ int dictRehashMilliseconds(dict *d, int ms) {
 static void _dictRehashStep(dict *d) {
     if (d->iterators == 0) dictRehash(d,1);
 }
-
+/*
+调用逻辑图如下:
+                                        +----------------------------------+
+                                        |                                  v
++-----------+     +-------------+     +---------+     +------------+     +---------------+     +---------------------+     +------------+
+|  dict 操作 | ~~> |    dbAdd    | --> | dictAdd | --> | dictAddRaw | --> | _dictKeyIndex | --> | _dictExpandIfNeeded | --> | dictExpand |
++-----------+     +-------------+     +---------+     +------------+     +---------------+     +---------------------+     +------------+
+                                        ^
+                                        |
+                                        |
++-----------+     +-------------+       |
+| redis-cli | ~~> | dictReplace | ------+
++-----------+     +-------------+
+*/
 /* Add an element to the target hash table */
 int dictAdd(dict *d, void *key, void *val)
 {
     dictEntry *entry = dictAddRaw(d,key,NULL);
 
-    if (!entry) return DICT_ERR;
-    dictSetVal(d, entry, val);
+    if (!entry) return DICT_ERR; // 如果键存在，则返回失败
+    dictSetVal(d, entry, val); // 键不存在，则设置节点值
     return DICT_OK;
 }
 
@@ -289,16 +303,18 @@ int dictAdd(dict *d, void *key, void *val)
  *
  * If key was added, the hash entry is returned to be manipulated by the caller.
  */
+/* 将 Key 插入哈希表 */
 dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
 {
     long index;
     dictEntry *entry;
     dictht *ht;
 
-    if (dictIsRehashing(d)) _dictRehashStep(d);
+    if (dictIsRehashing(d)) _dictRehashStep(d); // 如果哈希表在 rehashing，则执行单步 rehash
 
     /* Get the index of the new element, or -1 if
      * the element already exists. */
+     /* 调用 _dictKeyIndex() 检查 key 是否存在(存在返回 -1)，如果存在则返回 NULL */ 
     if ((index = _dictKeyIndex(d, key, dictHashKey(d,key), existing)) == -1)
         return NULL;
 
@@ -308,7 +324,7 @@ dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
      * more frequently. */
     ht = dictIsRehashing(d) ? &d->ht[1] : &d->ht[0];
     entry = zmalloc(sizeof(*entry));
-    entry->next = ht->table[index];
+    entry->next = ht->table[index]; // 将节点插入链表表头
     ht->table[index] = entry;
     ht->used++;
 
@@ -931,11 +947,13 @@ static int _dictExpandIfNeeded(dict *d)
      * table (global setting) or we should avoid it but the ratio between
      * elements/buckets is over the "safe" threshold, we resize doubling
      * the number of buckets. */
+    /* (ht[0].used/ht[0].size)>=1 前提下，
+       当满足 dict_can_resize=1 或 ht[0].used/t[0].size>5时，便对字典进行扩展 */
     if (d->ht[0].used >= d->ht[0].size &&
         (dict_can_resize ||
          d->ht[0].used/d->ht[0].size > dict_force_resize_ratio))
     {
-        return dictExpand(d, d->ht[0].used*2);
+        return dictExpand(d, d->ht[0].used*2); // 扩展字典为原来的2倍
     }
     return DICT_OK;
 }
@@ -948,7 +966,7 @@ static unsigned long _dictNextPower(unsigned long size)
     if (size >= LONG_MAX) return LONG_MAX + 1LU;
     while(1) {
         if (i >= size)
-            return i;
+            return i; // i 取值为 > size 的第一个 2 的幂
         i *= 2;
     }
 }
@@ -960,6 +978,7 @@ static unsigned long _dictNextPower(unsigned long size)
  *
  * Note that if we are in the process of rehashing the hash table, the
  * index is always returned in the context of the second (new) hash table. */
+/* 计算存储 Key 的 bucket 的位置 */
 static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **existing)
 {
     unsigned long idx, table;
@@ -967,12 +986,12 @@ static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **e
     if (existing) *existing = NULL;
 
     /* Expand the hash table if needed */
-    if (_dictExpandIfNeeded(d) == DICT_ERR)
+    if (_dictExpandIfNeeded(d) == DICT_ERR) /* 检查是否需要扩展哈希表，不足则扩展 */ 
         return -1;
     for (table = 0; table <= 1; table++) {
-        idx = hash & d->ht[table].sizemask;
+        idx = hash & d->ht[table].sizemask; // 计算 Key 的 bucket 位置
         /* Search if this slot does not already contain the given key */
-        he = d->ht[table].table[idx];
+        he = d->ht[table].table[idx]; // 检查节点上是否存在要 add 的 Key
         while(he) {
             if (key==he->key || dictCompareKeys(d, key, he->key)) {
                 if (existing) *existing = he;
@@ -980,7 +999,7 @@ static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **e
             }
             he = he->next;
         }
-        if (!dictIsRehashing(d)) break;
+        if (!dictIsRehashing(d)) break; // 扫完ht[0]后，如果哈希表不在rehashing，则无需再扫ht[1]
     }
     return idx;
 }

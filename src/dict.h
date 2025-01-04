@@ -44,15 +44,35 @@
 /* Unused arguments generate annoying warnings... */
 #define DICT_NOTUSED(V) ((void) V)
 
+/*
++-------------------+       +-------------------+       +-------------------+
+|      dictht       |       |    dictEntry      |       |    dictEntry      |
++-------------------+       +-------------------+       +-------------------+
+| table             |       | key = A           |       | key = C           |
+|   +-------------+ |       | v = ...           |       | v = ...           |
+|   |    [0]     |--------->| next              | ----> | next              | ----> NULL
+|   +-------------+ |       +-------------------+       +-------------------+
+|   |    [1]     |--------->| key = B           |
+|   +-------------+ |       | v = ...           |
+|   |    [2]     |---+      | next              | ----> NULL
+|   +-------------+ |       +-------------------+
+|   |    [3]     |---+
+|   +-------------+ |
+| size = 4          |
+| sizemask = 3      |
+| used = 3          |
++-------------------+
+*/
+/* 哈希桶定义 */
 typedef struct dictEntry {
-    void *key;
-    union {
-        void *val;
-        uint64_t u64;
-        int64_t s64;
-        double d;
+    void *key; // 键定义
+    union {  // 值定义
+        void *val;    // 自定义类型
+        uint64_t u64; // 无符号整形
+        int64_t s64;  // 有符号整形
+        double d;     // 浮点型
     } v;
-    struct dictEntry *next;
+    struct dictEntry *next;  //指向下一个哈希表节点，形成链表,用于解决哈希冲突
 } dictEntry;
 
 typedef struct dictType {
@@ -64,21 +84,23 @@ typedef struct dictType {
     void (*valDestructor)(void *privdata, void *obj);
 } dictType;
 
+/* hash表结构定义 */
 /* This is our hash table structure. Every dictionary has two of this as we
  * implement incremental rehashing, for the old to the new table. */
 typedef struct dictht {
-    dictEntry **table;
-    unsigned long size;
-    unsigned long sizemask;
-    unsigned long used;
+    dictEntry **table; // 哈希表数组
+    unsigned long size; // 哈希表的大小,即 table 数组的长度, 即 hash 桶的数量
+    unsigned long sizemask; // 哈希表大小掩码，用于计算索引值
+    unsigned long used; // 哈希表现有节点的数量, 即 占用的 dictEntry 的数量
 } dictht;
 
+/* 字典结构定义 */
 typedef struct dict {
-    dictType *type;
-    void *privdata;
-    dictht ht[2];
-    long rehashidx; /* rehashing not in progress if rehashidx == -1 */
-    unsigned long iterators; /* number of iterators currently running */
+    dictType *type; // 字典类型
+    void *privdata; // 私有数据
+    dictht ht[2]; // 哈希表[两个],ht[0]为正常使用的哈希表,ht[1]为rehash时使用的哈希表
+    long rehashidx; /* rehashing not in progress if rehashidx == -1 */ // 记录rehash 进度的标志，值为-1表示rehash未进行
+    unsigned long iterators; /* number of iterators currently running */ //  当前正在迭代的迭代器数
 } dict;
 
 /* If safe is set to 1 this is a safe iterator, that means, you can call

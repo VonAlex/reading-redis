@@ -103,7 +103,7 @@ static inline size_t sdslen(const sds s) {
 
 static inline size_t sdsavail(const sds s) {
     unsigned char flags = s[-1];
-    switch(flags&SDS_TYPE_MASK) {
+    switch(flags&SDS_TYPE_MASK) { // 取低 3 位
         case SDS_TYPE_5: {
             return 0;
         }
@@ -228,6 +228,9 @@ sds sdscpylen(sds s, const char *t, size_t len);
 sds sdscpy(sds s, const char *t);
 
 sds sdscatvprintf(sds s, const char *fmt, va_list ap);
+
+// 提示编译器检查函数调用的过程中，可变参数部分按照 printf 的规则进行检查，
+// 若参数的个数或者类型不匹配，编译过程中将会发出警告, 注意编译时要加上 –Wall 才可以
 #ifdef __GNUC__
 sds sdscatprintf(sds s, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
